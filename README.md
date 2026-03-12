@@ -1,36 +1,173 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Qura Health — Quantum Clinical Scheduler
+
+A web application that optimizes appointment and surgery scheduling for public hospitals in Peru using **Simulated Quantum Annealing** (QUBO formulation via `pyqubo` + `openjij`).
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────┐
+│  Next.js (Vercel)                                    │
+│  ├── /auth/login  /auth/signup                       │
+│  ├── /dashboard/patient                              │
+│  ├── /dashboard/admin   ──── POST /api/optimize ──┐  │
+│  └── /dashboard/doctor                             │  │
+└────────────────────────────────────────────────────┼──┘
+                          Supabase (PostgreSQL + RLS) │
+                                                      ▼
+                          ┌──────────────────────────────┐
+                          │  FastAPI (Render / Railway)  │
+                          │  POST /solve                 │
+                          │  pyqubo + openjij SQA        │
+                          └──────────────────────────────┘
+```
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend & API Routes | Next.js 16 · App Router · TypeScript · TailwindCSS |
+| Database & Auth | Supabase (PostgreSQL 15, RLS, Auth) |
+| Optimization Engine | Python · FastAPI · pyqubo · openjij |
+| Deploy (frontend) | Vercel |
+| Deploy (optimizer) | Render or Railway |
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
+
+- Node.js 20+
+- Python 3.11+
+- A [Supabase](https://supabase.com) project
+
+### 1. Clone & install dependencies
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# Install Next.js dependencies
+npm install
+
+# Install Python dependencies
+cd optimizer
+pip install -r requirements.txt
+cd ..
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Configure environment variables
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+cp .env.local.example .env.local
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Edit `.env.local` with your Supabase URL, anon key, and optimizer service URL.
 
-## Learn More
+### 3. Set up the database
 
-To learn more about Next.js, take a look at the following resources:
+In your Supabase project, go to **SQL Editor** and run the full contents of:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+supabase/schema.sql
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+This creates all tables, enums, indexes, RLS policies, and triggers.
 
-## Deploy on Vercel
+### 4. Configure Supabase Auth
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+In Supabase Dashboard → **Authentication** → **URL Configuration**:
+- Site URL: `http://localhost:3000`
+- Redirect URLs: `http://localhost:3000/auth/callback`
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### 5. Run locally
+
+**Terminal 1 — Next.js:**
+```bash
+npm run dev
+```
+
+**Terminal 2 — Python optimizer:**
+```bash
+cd optimizer
+uvicorn app.main:app --reload --port 8000
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+## User Roles
+
+| Role | Access | Capabilities |
+|---|---|---|
+| `patient` | `/dashboard/patient` | Submit appointment requests, view assigned schedule |
+| `doctor` | `/dashboard/doctor` | View chronological schedule, mark appointments complete |
+| `admin` | `/dashboard/admin` | Monitor pool, insert walk-ins, trigger quantum optimization |
+
+## The Optimization Algorithm
+
+The Python microservice formulates a **QUBO** (Quadratic Unconstrained Binary Optimization) problem:
+
+$$H = -\sum_{i,j,t} U_i x_{i,j,t} + \lambda_1 \sum_{j,t}\left(\sum_i x_{i,j,t}-1\right)^2 + \lambda_2 \sum_i \left(\sum_{j,t} x_{i,j,t}-1\right)^2$$
+
+Where:
+- $x_{i,j,t} \in \{0,1\}$ — patient $i$ assigned to doctor $j$ at time slot $t$
+- **Term 1** — Maximize scheduling of high-urgency patients
+- **Term 2** — Constraint: doctor sees at most 1 patient per slot (penalty $\lambda_1$)
+- **Term 3** — Constraint: patient scheduled exactly once (penalty $\lambda_2$)
+
+Solved using `openjij.SQASampler` (Simulated Quantum Annealing).
+
+## Deployment
+
+### Next.js → Vercel
+
+```bash
+vercel --prod
+```
+
+Set environment variables in Vercel dashboard:
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `OPTIMIZER_SERVICE_URL`
+
+### Python Optimizer → Render
+
+1. Create a new **Web Service** in Render pointing to the `/optimizer` directory
+2. Build command: `pip install -r requirements.txt`
+3. Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+4. Set `ALLOWED_ORIGINS` to your Vercel URL
+
+Or deploy with Docker:
+```bash
+cd optimizer
+docker build -t qura-optimizer .
+docker run -p 8000:8000 qura-optimizer
+```
+
+## Project Structure
+
+```
+/Qura
+├── src/
+│   ├── app/
+│   │   ├── auth/login/         # Login page
+│   │   ├── auth/signup/        # Signup with role selection
+│   │   ├── auth/callback/      # Supabase OAuth callback
+│   │   ├── dashboard/patient/  # Patient dashboard
+│   │   ├── dashboard/admin/    # Admin dashboard + quantum trigger
+│   │   ├── dashboard/doctor/   # Doctor schedule view
+│   │   └── api/optimize/       # Next.js API → Python microservice
+│   ├── components/
+│   │   ├── AuthCard.tsx        # Shared auth UI wrapper
+│   │   └── DashboardLayout.tsx # Sidebar layout for dashboards
+│   ├── lib/
+│   │   ├── supabase.ts         # Browser + server Supabase clients
+│   │   ├── types.ts            # TypeScript domain types
+│   │   └── database.types.ts   # Supabase table types
+│   └── middleware.ts           # Role-based route protection
+├── optimizer/
+│   ├── app/
+│   │   ├── main.py             # FastAPI app
+│   │   ├── qubo_solver.py      # QUBO formulation + OpenJij solver
+│   │   └── models.py           # Pydantic request/response models
+│   ├── requirements.txt
+│   └── Dockerfile
+├── supabase/
+│   └── schema.sql              # Complete DB schema with RLS
+└── .env.local.example
+```
