@@ -19,10 +19,7 @@ export default function LoginPage() {
     setError(null)
 
     const supabase = createClient()
-    const { data, error: authError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password })
 
     if (authError) {
       setError(authError.message)
@@ -31,7 +28,6 @@ export default function LoginPage() {
     }
 
     if (data.user) {
-      // Fetch role and redirect
       const { data: profile } = await supabase
         .from('users')
         .select('role')
@@ -43,8 +39,9 @@ export default function LoginPage() {
         admin: '/dashboard/admin',
         patient: '/dashboard/patient',
       }
-
-      const route = profile?.role ? roleRoutes[profile.role as keyof typeof roleRoutes] : '/dashboard/patient'
+      const route = profile?.role
+        ? roleRoutes[profile.role as keyof typeof roleRoutes]
+        : '/dashboard/patient'
       router.push(route)
       router.refresh()
     }
@@ -65,7 +62,7 @@ export default function LoginPage() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-4 py-2.5 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+            className="w-full px-4 py-2.5 bg-slate-800/60 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition"
             placeholder="usuario@hospital.pe"
           />
         </div>
@@ -79,7 +76,7 @@ export default function LoginPage() {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-4 py-2.5 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+            className="w-full px-4 py-2.5 bg-slate-800/60 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition"
             placeholder="••••••••"
           />
         </div>
@@ -96,7 +93,7 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-800"
+          className="w-full py-2.5 px-4 bg-sky-600 hover:bg-sky-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-900"
         >
           {loading ? (
             <span className="flex items-center justify-center gap-2">
@@ -106,15 +103,13 @@ export default function LoginPage() {
               </svg>
               Verificando...
             </span>
-          ) : (
-            'Ingresar'
-          )}
+          ) : 'Ingresar'}
         </button>
       </form>
 
       <p className="text-center text-slate-400 text-sm mt-6">
-        ¿No tienes cuenta?{' '}
-        <Link href="/auth/signup" className="text-blue-400 hover:text-blue-300 font-medium transition">
+        Sin cuenta?{' '}
+        <Link href="/auth/signup" className="text-sky-400 hover:text-sky-300 font-medium transition">
           Regístrate aquí
         </Link>
       </p>

@@ -33,7 +33,7 @@ interface Props {
 
 const STATUS_CONFIG = {
   pending:   { label: 'Pendiente',   color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30' },
-  scheduled: { label: 'Programado',  color: 'bg-blue-500/10 text-blue-400 border-blue-500/30' },
+  scheduled: { label: 'Programado',  color: 'bg-sky-500/10 text-sky-400 border-sky-500/30' },
   completed: { label: 'Completado',  color: 'bg-green-500/10 text-green-400 border-green-500/30' },
   cancelled: { label: 'Cancelado',   color: 'bg-red-500/10 text-red-400 border-red-500/30' },
 }
@@ -107,7 +107,7 @@ export function PatientDashboardClient({ userName, userId, initialAppointments }
           </div>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg transition text-sm"
+            className="flex items-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-semibold rounded-lg transition text-sm"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -124,15 +124,15 @@ export function PatientDashboardClient({ userName, userId, initialAppointments }
           </div>
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
             <p className="text-slate-400 text-sm">Programadas</p>
-            <p className="text-3xl font-bold text-blue-400 mt-1">{scheduledCount}</p>
+            <p className="text-3xl font-bold text-sky-400 mt-1">{scheduledCount}</p>
           </div>
         </div>
 
         {/* New appointment form */}
         {showForm && (
-          <div className="bg-slate-900 border border-blue-500/30 rounded-2xl p-6 mb-6 shadow-lg shadow-blue-900/10">
+          <div className="bg-slate-900 border border-sky-500/30 rounded-2xl p-6 mb-6 shadow-lg shadow-blue-900/10">
             <h3 className="text-white font-semibold text-lg mb-4 flex items-center gap-2">
-              <svg className="w-5 h-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="w-5 h-5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
               Nueva Solicitud de Cita
@@ -153,7 +153,7 @@ export function PatientDashboardClient({ userName, userId, initialAppointments }
                     <select
                       value={specialty}
                       onChange={(e) => setSpecialty(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                      className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
                     >
                       {SPECIALTIES.map((s) => <option key={s} value={s}>{s}</option>)}
                     </select>
@@ -165,7 +165,7 @@ export function PatientDashboardClient({ userName, userId, initialAppointments }
                       value={preferredDate}
                       onChange={(e) => setPreferredDate(e.target.value)}
                       min={new Date().toISOString().split('T')[0]}
-                      className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                      className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
                     />
                   </div>
                 </div>
@@ -181,7 +181,7 @@ export function PatientDashboardClient({ userName, userId, initialAppointments }
                       min={1} max={10}
                       value={urgency}
                       onChange={(e) => setUrgency(Number(e.target.value))}
-                      className="flex-1 accent-blue-500"
+                      className="flex-1 accent-sky-500"
                     />
                     <span className="text-slate-500 text-xs">Alta (10)</span>
                   </div>
@@ -197,7 +197,7 @@ export function PatientDashboardClient({ userName, userId, initialAppointments }
                     value={symptoms}
                     onChange={(e) => setSymptoms(e.target.value)}
                     rows={3}
-                    className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition resize-none"
+                    className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 transition resize-none"
                     placeholder="Describe tus síntomas con el mayor detalle posible..."
                   />
                 </div>
@@ -210,7 +210,7 @@ export function PatientDashboardClient({ userName, userId, initialAppointments }
                   <button
                     type="submit"
                     disabled={submitting}
-                    className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white font-semibold rounded-lg transition"
+                    className="flex-1 py-2.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-60 text-white font-semibold rounded-lg transition"
                   >
                     {submitting ? 'Enviando...' : 'Enviar Solicitud'}
                   </button>
@@ -238,7 +238,7 @@ export function PatientDashboardClient({ userName, userId, initialAppointments }
               <p className="text-slate-400">No tienes solicitudes de cita aún.</p>
               <button
                 onClick={() => setShowForm(true)}
-                className="mt-4 text-blue-400 hover:text-blue-300 text-sm font-medium"
+                className="mt-4 text-sky-400 hover:text-sky-300 text-sm font-medium"
               >
                 Crear tu primera solicitud →
               </button>
@@ -278,7 +278,7 @@ export function PatientDashboardClient({ userName, userId, initialAppointments }
                       <div className="mt-4 pt-4 border-t border-slate-800 grid grid-cols-3 gap-3">
                         <div>
                           <p className="text-slate-500 text-xs mb-0.5">Fecha y hora</p>
-                          <p className="text-blue-300 text-sm font-medium">
+                          <p className="text-sky-300 text-sm font-medium">
                             {new Date(schedule.scheduled_datetime).toLocaleString('es-PE', {
                               weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
                             })}

@@ -116,7 +116,7 @@ export function DoctorDashboardClient({
           <div>
             <h1 className="text-2xl font-bold text-white">Agenda Médica</h1>
             <div className="flex items-center gap-3 mt-1">
-              <span className="text-blue-400 font-medium text-sm">{specialty}</span>
+              <span className="text-sky-400 font-medium text-sm">{specialty}</span>
               {room && (
                 <>
                   <span className="text-slate-600">•</span>
@@ -136,7 +136,7 @@ export function DoctorDashboardClient({
                 onClick={() => setViewMode(mode)}
                 className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${
                   viewMode === mode
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-sky-600 text-white'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
@@ -159,11 +159,11 @@ export function DoctorDashboardClient({
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
             <p className="text-slate-400 text-sm">Cumplimiento</p>
             <div className="flex items-end gap-2 mt-1">
-              <p className="text-3xl font-bold text-green-400">{completionRate}%</p>
+              <p className="text-3xl font-bold text-emerald-400">{completionRate}%</p>
             </div>
             <div className="mt-2 bg-slate-800 rounded-full h-1.5">
               <div
-                className="bg-green-400 h-1.5 rounded-full transition-all"
+                className="bg-emerald-400 h-1.5 rounded-full transition-all"
                 style={{ width: `${completionRate}%` }}
               />
             </div>
@@ -203,7 +203,7 @@ export function DoctorDashboardClient({
                         <div className="flex items-start gap-4">
                           {/* Time column */}
                           <div className="shrink-0 text-center w-16">
-                            <p className="text-blue-400 font-bold text-lg leading-none">
+                            <p className="text-sky-400 font-bold text-lg leading-none">
                               {new Date(entry.scheduled_datetime).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}
                             </p>
                             {entry.room && (
@@ -220,7 +220,7 @@ export function DoctorDashboardClient({
                               <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
                                 entry.urgency_level >= 8 ? 'bg-red-500/15 text-red-400' :
                                 entry.urgency_level >= 5 ? 'bg-yellow-500/15 text-yellow-400' :
-                                'bg-green-500/15 text-green-400'
+                                'bg-green-500/15 text-emerald-400'
                               }`}>
                                 U{entry.urgency_level}
                               </span>
@@ -232,7 +232,7 @@ export function DoctorDashboardClient({
                               <p className="text-slate-400 text-sm line-clamp-2">{entry.symptoms}</p>
                             )}
                             {isCompleted && (
-                              <p className="text-green-400 text-xs mt-1 flex items-center gap-1">
+                              <p className="text-emerald-400 text-xs mt-1 flex items-center gap-1">
                                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                                 </svg>
@@ -245,7 +245,7 @@ export function DoctorDashboardClient({
                           {!isCompleted && (
                             <button
                               onClick={() => setNotesModal(entry.schedule_id)}
-                              className="shrink-0 flex items-center gap-2 px-4 py-2 bg-green-600/10 hover:bg-green-600/20 border border-green-600/30 text-green-400 text-sm font-medium rounded-lg transition"
+                              className="shrink-0 flex items-center gap-2 px-4 py-2 bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 text-sm font-medium rounded-lg transition"
                             >
                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -277,7 +277,7 @@ export function DoctorDashboardClient({
                 value={completionNotes}
                 onChange={(e) => setCompletionNotes(e.target.value)}
                 rows={3}
-                className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-green-500 transition resize-none"
+                className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition resize-none"
                 placeholder="Diagnóstico, indicaciones, seguimiento..."
               />
             </div>
@@ -288,7 +288,7 @@ export function DoctorDashboardClient({
                   if (entry) handleMarkComplete(notesModal, entry.appointment_id)
                 }}
                 disabled={completingId !== null}
-                className="flex-1 py-2.5 bg-green-600 hover:bg-green-500 disabled:opacity-60 text-white font-semibold rounded-lg transition"
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-semibold rounded-lg transition"
               >
                 {completingId ? 'Guardando...' : 'Confirmar'}
               </button>

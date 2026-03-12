@@ -188,7 +188,7 @@ export function AdminDashboardClient({
             <button
               onClick={handleRunOptimizer}
               disabled={running}
-              className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition text-sm shadow-lg shadow-violet-900/30"
+              className="flex items-center gap-2 px-5 py-2.5 bg-sky-700 hover:bg-sky-600 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition text-sm shadow-lg shadow-sky-900/30"
             >
               {running ? (
                 <>
@@ -232,16 +232,46 @@ export function AdminDashboardClient({
         {/* Metrics */}
         <div className="grid grid-cols-3 gap-5 mb-8">
           {[
-            { label: 'Pendientes de asignar', value: metrics.totalPending, color: 'text-yellow-400', icon: '⏳' },
-            { label: 'Citas programadas', value: metrics.totalScheduled, color: 'text-blue-400', icon: '📅' },
-            { label: 'Completadas hoy', value: metrics.completedToday, color: 'text-green-400', icon: '✅' },
+            {
+              label: 'Pendientes de asignar',
+              value: metrics.totalPending,
+              color: 'text-amber-400',
+              bg: 'bg-amber-400/10 border-amber-400/20',
+              icon: (
+                <svg className="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              ),
+            },
+            {
+              label: 'Citas programadas',
+              value: metrics.totalScheduled,
+              color: 'text-sky-400',
+              bg: 'bg-sky-400/10 border-sky-400/20',
+              icon: (
+                <svg className="w-5 h-5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                </svg>
+              ),
+            },
+            {
+              label: 'Completadas hoy',
+              value: metrics.completedToday,
+              color: 'text-emerald-400',
+              bg: 'bg-emerald-400/10 border-emerald-400/20',
+              icon: (
+                <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              ),
+            },
           ].map((m) => (
-            <div key={m.label} className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-slate-700 transition">
-              <div className="flex items-center gap-3 mb-2">
-                <span className="text-2xl">{m.icon}</span>
-                <p className="text-slate-400 text-sm">{m.label}</p>
+            <div key={m.label} className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 hover:border-sky-900/60 transition">
+              <div className={`inline-flex items-center justify-center w-9 h-9 rounded-lg border mb-3 ${m.bg}`}>
+                {m.icon}
               </div>
-              <p className={`text-4xl font-bold ${m.color}`}>{m.value}</p>
+              <p className="text-slate-400 text-sm mb-1">{m.label}</p>
+              <p className={`text-3xl font-bold tracking-tight ${m.color}`}>{m.value}</p>
             </div>
           ))}
         </div>
@@ -334,7 +364,7 @@ export function AdminDashboardClient({
                           <span className="text-slate-400">Asignadas: <span className="text-green-400 font-medium">{summary.assigned}</span></span>
                           <span className="text-slate-400">Sin asignar: <span className="text-yellow-400 font-medium">{summary.unassigned}</span></span>
                           {summary.energy !== undefined && (
-                            <span className="text-slate-400 col-span-2">Energía QUBO: <span className="text-violet-400 font-mono">{Number(summary.energy).toFixed(3)}</span></span>
+                            <span className="text-slate-400 col-span-2">Energía QUBO: <span className="text-sky-400 font-mono">{Number(summary.energy).toFixed(3)}</span></span>
                           )}
                         </div>
                       )}
@@ -370,7 +400,7 @@ export function AdminDashboardClient({
                     required
                     value={wiPatientEmail}
                     onChange={(e) => setWiPatientEmail(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 transition"
+                    className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
                     placeholder="paciente@email.com"
                   />
                 </div>
@@ -379,20 +409,20 @@ export function AdminDashboardClient({
                   <select
                     value={wiSpecialty}
                     onChange={(e) => setWiSpecialty(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-violet-500 transition"
+                    className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
                   >
                     {SPECIALTIES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-300 mb-2">
-                    Urgencia: <span className="text-violet-400 font-bold">{wiUrgency}/10</span>
+                    Urgencia: <span className="text-sky-400 font-bold">{wiUrgency}/10</span>
                   </label>
                   <input
                     type="range" min={1} max={10}
                     value={wiUrgency}
                     onChange={(e) => setWiUrgency(Number(e.target.value))}
-                    className="w-full accent-violet-500"
+                    className="w-full accent-sky-500"
                   />
                 </div>
                 <div>
@@ -401,7 +431,7 @@ export function AdminDashboardClient({
                     value={wiSymptoms}
                     onChange={(e) => setWiSymptoms(e.target.value)}
                     rows={2}
-                    className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 transition resize-none"
+                    className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 transition resize-none"
                   />
                 </div>
 
@@ -411,7 +441,7 @@ export function AdminDashboardClient({
                   <button
                     type="submit"
                     disabled={wiSubmitting}
-                    className="flex-1 py-2.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-60 text-white font-semibold rounded-lg transition"
+                    className="flex-1 py-2.5 bg-sky-700 hover:bg-sky-600 disabled:opacity-60 text-white font-semibold rounded-lg transition"
                   >
                     {wiSubmitting ? 'Insertando...' : 'Insertar en Cola'}
                   </button>
