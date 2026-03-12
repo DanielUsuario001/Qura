@@ -90,8 +90,9 @@ export interface AppointmentPool {
 }
 
 export interface OptimizerParameters {
-  lambda1: number
-  lambda2: number
+  lambda1: number    // Penalty: doctor sees ≤1 patient per slot (default 50)
+  lambda2: number    // Penalty: patient scheduled exactly once (default 50)
+  lambda4: number    // Reward multiplier for R_i referral term (default 20)
   num_reads: number
   num_sweeps: number
   beta_range?: [number, number]
@@ -162,10 +163,13 @@ export interface DoctorScheduleEntry {
 // API types for the Python optimizer microservice
 // ============================================================
 
+export type ReferralSource = 'direct' | 'doctor_referred'
+
 export interface OptimizerPatientInput {
   id: string
   urgency: number
   specialty: string
+  referral_multiplier: number  // R_i: 1.0 = direct, 10.0 = doctor_referred
 }
 
 export interface OptimizerDoctorInput {

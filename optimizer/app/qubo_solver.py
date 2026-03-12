@@ -1,23 +1,27 @@
 """
-QUBO formulation and Simulated Quantum Annealing solver for clinical scheduling.
+QUBO formulation for clinical scheduling — Peru MINSA/EsSalud referral model.
 
-Hamiltonian:
-  H = - Σ_{i,j,t}  U_i · x_{i,j,t}                         (maximize urgency scheduling)
-      + λ₁ · Σ_{j,t} (Σ_i x_{i,j,t} - 1)²                 (doctor sees ≤1 patient per slot)
-      + λ₂ · Σ_i    (Σ_{j,t} x_{i,j,t} - 1)²               (patient scheduled exactly once)
+Hamiltonian H(x) (minimized):
 
-Variables:
-  x_{i,j,t} ∈ {0,1}  →  appointment i assigned to doctor j at time t
+  H = - Σ_{i,j,t | C_{i,j}=1}  (U_i + λ₄·R_i) · x_{i,j,t}     [Terms 1+4 combined]
+      + λ₁ · Σ_{j,t} (Σ_i x_{i,j,t})(Σ_i x_{i,j,t} - 1)        [Term 2: doctor ≤1 patient/slot]
+      + λ₂ · Σ_i (Σ_{j,t} x_{i,j,t} - 1)²                       [Term 3: patient scheduled once]
+
+Key design decisions:
+  - C_{i,j} = 1 only when specialties match → Binary variables are ONLY created for
+    valid (i,j,t) triplets, drastically reducing QUBO matrix size.
+  - R_i encodes referral priority: 1.0 for direct web requests, 10.0 for GP referrals.
+  - Terms 1 and 4 are both linear and share the same loop (combined as `peso`).
+  - Solved with openjij.SASampler (Simulated Annealing).
 """
 from __future__ import annotations
 
 import logging
-import math
 import time
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
-from pyqubo import Array, Constraint, Placeholder
+from pyqubo import Binary, Placeholder
 import openjij as oj
 
 from .models import (
@@ -31,42 +35,35 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 
-# ── Time slot generation ─────────────────────────────────────────────────────
+# ── Time slot generation ──────────────────────────────────────────────────────
 
 DAY_MAP = {
     "monday": 0, "tuesday": 1, "wednesday": 2,
-    "thursday": 3, "friday": 4, "saturday": 5
+    "thursday": 3, "friday": 4, "saturday": 5,
 }
+
 
 def generate_time_slots(
     doctors: list[DoctorInput],
     slot_duration_minutes: int = 30,
     horizon_days: int = 5,
 ) -> list[str]:
-    """
-    Build a deduplicated list of ISO datetime strings for all possible
-    time slots across the scheduling horizon, respecting doctor availability.
-    """
+    """Return a sorted, deduplicated list of ISO datetime slots across the horizon."""
     slots: set[str] = set()
     base_date = datetime.now(tz=timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
-
     for day_offset in range(horizon_days):
         current_date = base_date + timedelta(days=day_offset)
-        weekday = current_date.weekday()  # 0=Monday
-
+        weekday = current_date.weekday()
         for doctor in doctors:
             for slot in doctor.available_slots:
                 if DAY_MAP.get(slot.day, -1) != weekday:
                     continue
-
                 start_h, start_m = map(int, slot.start_time.split(":"))
                 end_h, end_m = map(int, slot.end_time.split(":"))
-
                 current = current_date.replace(hour=start_h, minute=start_m)
                 end_dt = current_date.replace(hour=end_h, minute=end_m)
-
                 while current < end_dt:
                     slots.add(current.isoformat())
                     current += timedelta(minutes=slot_duration_minutes)
@@ -77,31 +74,30 @@ def generate_time_slots(
 
 
 def doctor_available_at(doctor: DoctorInput, slot_iso: str) -> bool:
-    """Check if a doctor has availability covering the given time slot."""
+    """True if doctor has an availability window that covers the given slot."""
     dt = datetime.fromisoformat(slot_iso)
     weekday_name = list(DAY_MAP.keys())[dt.weekday()] if dt.weekday() < 6 else None
     if weekday_name is None:
         return False
-
-    slot_time = dt.hour * 60 + dt.minute
+    slot_min = dt.hour * 60 + dt.minute
     for avail in doctor.available_slots:
         if avail.day != weekday_name:
             continue
-        start_h, start_m = map(int, avail.start_time.split(":"))
-        end_h, end_m = map(int, avail.end_time.split(":"))
-        if start_h * 60 + start_m <= slot_time < end_h * 60 + end_m:
+        sh, sm = map(int, avail.start_time.split(":"))
+        eh, em = map(int, avail.end_time.split(":"))
+        if sh * 60 + sm <= slot_min < eh * 60 + em:
             return True
     return False
 
 
 def specialties_match(patient_specialty: str, doctor_specialty: str) -> bool:
-    """Case-insensitive specialty matching with 'General' as fallback."""
+    """Case-insensitive specialty match; 'General' doctors accept any specialty."""
     if doctor_specialty.lower() == "general":
         return True
     return patient_specialty.lower() == doctor_specialty.lower()
 
 
-# ── QUBO Formulation ─────────────────────────────────────────────────────────
+# ── QUBO formulation ──────────────────────────────────────────────────────────
 
 def build_and_solve(
     patients: list[PatientInput],
@@ -109,102 +105,125 @@ def build_and_solve(
     params: OptimizerParameters,
 ) -> tuple[list[Assignment], float]:
     """
-    Build the QUBO model and solve with OpenJij's Simulated Quantum Annealing.
-
+    Build a sparse QUBO model using C_{i,j} pre-filtering and solve with SASampler.
+    Only Binary variables for valid (i,j,t) triplets are created.
     Returns (assignments, best_energy).
     """
-    start_ms = int(time.time() * 1000)
-
     if not patients:
         return [], 0.0
 
-    # Generate feasible time slots
     time_slots = generate_time_slots(doctors)
     if not time_slots:
         logger.warning("No time slots generated — check doctor availability config")
         return [], 0.0
 
-    # Limit problem size to avoid memory explosion
-    # For large instances, consider decomposing by specialty
+    # Hard size limits to prevent memory explosion
     MAX_PATIENTS = 50
-    MAX_SLOTS = 40
-    MAX_DOCTORS = 20
+    MAX_SLOTS    = 40
+    MAX_DOCTORS  = 20
 
-    patients = patients[:MAX_PATIENTS]
-    time_slots = time_slots[:MAX_SLOTS]
-    doctors = doctors[:MAX_DOCTORS]
+    patients    = patients[:MAX_PATIENTS]
+    time_slots  = time_slots[:MAX_SLOTS]
+    doctors     = doctors[:MAX_DOCTORS]
 
-    I = len(patients)  # number of appointments
-    J = len(doctors)   # number of doctors
-    T = len(time_slots)  # number of time slots
+    I = len(patients)
+    J = len(doctors)
+    T = len(time_slots)
 
-    logger.info("QUBO problem size: %d patients × %d doctors × %d slots = %d vars",
-                I, J, T, I * J * T)
-
-    # ── Binary variables x[i][j][t] ──────────────────────────────────────────
-    x = Array.create("x", shape=(I, J, T), vartype="BINARY")
-
-    # ── Urgency weights (normalized to [0,1]) ─────────────────────────────────
     max_urgency = max(p.urgency for p in patients) or 1
+    lambda4     = params.lambda4
 
-    # ── Objective: maximize scheduling of high-urgency patients ──────────────
-    # Negate because we minimize H
-    objective = 0.0
+    # ── Pre-processing: build compatibility matrix C_{i,j} and create only
+    #    Binary variables for feasible (i, j, t) triplets ────────────────────
+    #
+    # C[i][j] = 1  ↔  specialties_match AND doctor is available at ≥1 slot
+    # x_vars[(i,j,t)] = Binary variable  (only if C[i][j]=1 AND available at t)
+
+    x_vars: dict[tuple[int, int, int], object] = {}
+
     for i, patient in enumerate(patients):
-        u_i = patient.urgency / max_urgency
         for j, doctor in enumerate(doctors):
+            # Compatibility gate C_{i,j}
             if not specialties_match(patient.specialty, doctor.specialty):
-                continue  # hard constraint: don't penalize, just skip
+                continue  # C_{i,j} = 0 → skip entire (i,j) pair
+
             for t, slot in enumerate(time_slots):
                 if not doctor_available_at(doctor, slot):
-                    continue
-                objective -= u_i * x[i][j][t]
+                    continue  # doctor unavailable at this slot
+                x_vars[(i, j, t)] = Binary(f"x_{i}_{j}_{t}")
 
-    # ── Constraint 1: doctor j sees at most 1 patient at time t ──────────────
-    lambda1 = Placeholder("lambda1")
-    doctor_conflict = 0.0
-    for j in range(J):
-        for t in range(T):
-            occupancy = sum(x[i][j][t] for i in range(I))
-            # Penalize (occupancy - 1)^2 when occupancy > 1, else 0
-            # Using the constraint form: penalize occupancy*(occupancy-1) for ≤1
-            doctor_conflict += (occupancy * (occupancy - 1))
-
-    # ── Constraint 2: patient i scheduled at most once ────────────────────────
-    lambda2 = Placeholder("lambda2")
-    patient_uniqueness = 0.0
-    for i in range(I):
-        total_assigned = sum(
-            x[i][j][t]
-            for j in range(J)
-            for t in range(T)
-        )
-        # Penalize (total - 1)^2: patient must be scheduled exactly once
-        # We use (total*(total-1)) to penalize >1, then separately reward =1
-        patient_uniqueness += (total_assigned - 1) ** 2
-
-    # ── Full Hamiltonian ──────────────────────────────────────────────────────
-    H = (
-        objective
-        + lambda1 * doctor_conflict
-        + lambda2 * patient_uniqueness
+    total_vars = len(x_vars)
+    logger.info(
+        "QUBO sparse variables: %d / %d total (%.1f%% reduction via C_{i,j} filter)",
+        total_vars, I * J * T,
+        100.0 * (1 - total_vars / max(I * J * T, 1)),
     )
 
-    # Compile to QUBO
+    if total_vars == 0:
+        logger.warning("No feasible (patient, doctor, slot) combinations found")
+        return [], 0.0
+
+    # ── Terms 1 + 4 (combined linear reward) ─────────────────────────────────
+    #
+    # For each valid triplet:  peso = U_i + λ₄·R_i
+    # Contribution to H:       -peso · x_{i,j,t}
+    # (C_{i,j} = 1 for all x_vars, so the product reduces to U_i directly)
+
+    H_obj = 0.0
+    for (i, j, t), x_var in x_vars.items():
+        U_i   = patients[i].urgency / max_urgency
+        R_i   = patients[i].referral_multiplier
+        peso  = U_i + (lambda4 * R_i)
+        H_obj -= peso * x_var
+
+    # ── Term 2: doctor sees at most 1 patient per slot (λ₁) ──────────────────
+    #
+    # Penalize occupancy*(occupancy-1) for each (j,t) pair
+    # This equals 0 when occupancy ≤ 1, and grows quadratically above 1.
+
+    lambda1 = Placeholder("lambda1")
+    H_doctor = 0.0
+
+    # Group variables by (j, t)
+    by_jt: dict[tuple[int, int], list] = defaultdict(list)
+    for (i, j, t), x_var in x_vars.items():
+        by_jt[(j, t)].append(x_var)
+
+    for (j, t), vars_jt in by_jt.items():
+        if len(vars_jt) < 2:
+            continue  # at most 1 possible patient → constraint trivially satisfied
+        occupancy = sum(vars_jt)
+        H_doctor += occupancy * (occupancy - 1)
+
+    # ── Term 3: patient scheduled exactly once (λ₂) ───────────────────────────
+    #
+    # Penalize (Σ_{j,t} x_{i,j,t} - 1)² for each patient i.
+
+    lambda2 = Placeholder("lambda2")
+    H_patient = 0.0
+
+    by_i: dict[int, list] = defaultdict(list)
+    for (i, j, t), x_var in x_vars.items():
+        by_i[i].append(x_var)
+
+    for i, vars_i in by_i.items():
+        total_assigned = sum(vars_i)
+        H_patient += (total_assigned - 1) ** 2
+
+    # ── Full Hamiltonian ──────────────────────────────────────────────────────
+    H = H_obj + lambda1 * H_doctor + lambda2 * H_patient
+
+    # Compile and convert to QUBO dict
     model = H.compile()
-    feed_dict = {
-        "lambda1": params.lambda1,
-        "lambda2": params.lambda2,
-    }
+    feed_dict = {"lambda1": params.lambda1, "lambda2": params.lambda2}
     qubo_matrix, qubo_offset = model.to_qubo(feed_dict=feed_dict)
 
-    logger.info("QUBO matrix compiled: %d variables", len(qubo_matrix))
+    logger.info("QUBO matrix compiled with %d interactions", len(qubo_matrix))
 
-    # ── Solve with OpenJij SQA Sampler ────────────────────────────────────────
-    sampler = oj.SQASampler()
+    # ── Solve with SASampler ──────────────────────────────────────────────────
+    sampler = oj.SASampler()
 
-    # Build beta_range (inverse temperature schedule)
-    beta_min, beta_max = params.beta_range if params.beta_range else (0.1, 5.0)
+    beta_min, beta_max = params.beta_range if params.beta_range else (0.1, 10.0)
 
     response = sampler.sample_qubo(
         Q=qubo_matrix,
@@ -214,49 +233,60 @@ def build_and_solve(
         beta_max=beta_max,
     )
 
-    best_sample = response.first.sample
-    best_energy = response.first.energy + qubo_offset
+    best_sample  = response.first.sample
+    best_energy  = response.first.energy + qubo_offset
 
     logger.info("Best energy: %.4f (offset: %.4f)", best_energy, qubo_offset)
 
-    # ── Decode solution ────────────────────────────────────────────────────────
-    decoded, broken, energy = model.decode_sample(
+    # ── Decode solution ───────────────────────────────────────────────────────
+    decoded, broken, _ = model.decode_sample(
         best_sample, vartype="BINARY", feed_dict=feed_dict
     )
 
+    if broken:
+        logger.warning("%d broken constraints in best sample", len(broken))
+
     assignments: list[Assignment] = []
-    assigned_patients: set[int] = set()
-    doctor_slot_occupancy: dict[tuple[int, int], int] = {}
+    assigned_patients:  set[int]              = set()
+    doctor_slot_used:   dict[tuple[int, int], bool] = {}
 
-    for i, patient in enumerate(patients):
-        for j, doctor in enumerate(doctors):
-            for t, slot in enumerate(time_slots):
-                var_name = f"x[{i}][{j}][{t}]"
-                val = decoded.get("x", {}).get(f"[{i}][{j}][{t}]", 0)
+    # Sort by combined priority: referred patients first, then by urgency descending
+    sorted_triplets = sorted(
+        x_vars.keys(),
+        key=lambda ijt: (
+            -patients[ijt[0]].referral_multiplier,
+            -patients[ijt[0]].urgency,
+        ),
+    )
 
-                if val == 1 and i not in assigned_patients:
-                    # Validate constraints before accepting
-                    key = (j, t)
-                    if doctor_slot_occupancy.get(key, 0) >= 1:
-                        continue  # reject: slot already taken
-                    if not specialties_match(patient.specialty, doctor.specialty):
-                        continue
-                    if not doctor_available_at(doctor, slot):
-                        continue
+    for (i, j, t) in sorted_triplets:
+        var_name = f"x_{i}_{j}_{t}"
+        # Retrieve value from decoded sample
+        val = decoded.get("x", {}).get(f"_{i}_{j}_{t}", 0)
+        # Fallback: try direct sample lookup
+        if val == 0:
+            val = best_sample.get(var_name, 0)
 
-                    doctor_slot_occupancy[key] = doctor_slot_occupancy.get(key, 0) + 1
-                    assigned_patients.add(i)
+        if val != 1:
+            continue
+        if i in assigned_patients:
+            continue
+        if doctor_slot_used.get((j, t), False):
+            continue
 
-                    assignments.append(Assignment(
-                        patient_id=patient.id,
-                        doctor_id=doctor.id,
-                        time_slot=slot,
-                        room=doctor.room_number,
-                    ))
+        doctor_slot_used[(j, t)] = True
+        assigned_patients.add(i)
+
+        assignments.append(Assignment(
+            patient_id=patients[i].id,
+            doctor_id=doctors[j].id,
+            time_slot=time_slots[t],
+            room=doctors[j].room_number,
+        ))
 
     logger.info(
-        "Decoded %d assignments / %d patients (energy=%.4f, broken=%d constraints)",
-        len(assignments), I, best_energy, len(broken)
+        "Assigned %d / %d patients (broken_constraints=%d, energy=%.4f)",
+        len(assignments), I, len(broken), best_energy,
     )
 
     return assignments, best_energy

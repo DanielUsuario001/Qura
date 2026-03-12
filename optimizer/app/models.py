@@ -14,13 +14,23 @@ class AvailableSlot(BaseModel):
 
 
 class OptimizerParameters(BaseModel):
-    lambda1: float = Field(default=10.0, description="Penalty weight for doctor conflict constraint")
-    lambda2: float = Field(default=10.0, description="Penalty weight for patient uniqueness constraint")
-    num_reads: int = Field(default=1000, description="Number of SA reads")
-    num_sweeps: int = Field(default=500, description="Number of sweeps per read")
+    lambda1: float = Field(
+        default=50.0,
+        description="Penalty: doctor sees at most 1 patient per slot",
+    )
+    lambda2: float = Field(
+        default=50.0,
+        description="Penalty: patient scheduled exactly once",
+    )
+    lambda4: float = Field(
+        default=20.0,
+        description="Reward multiplier for referred appointments (R_i)",
+    )
+    num_reads: int   = Field(default=1000, description="Number of SA reads")
+    num_sweeps: int  = Field(default=500,  description="Number of sweeps per read")
     beta_range: Optional[tuple[float, float]] = Field(
         default=None,
-        description="SQA inverse temperature range [beta_min, beta_max]"
+        description="SA inverse temperature range [beta_min, beta_max]",
     )
 
 
@@ -28,6 +38,13 @@ class PatientInput(BaseModel):
     id: str = Field(description="appointment_pool.id — the appointment UUID, not user UUID")
     urgency: int = Field(ge=1, le=10, description="Urgency level 1-10")
     specialty: str
+    referral_multiplier: float = Field(
+        default=1.0,
+        description=(
+            "R_i: 1.0 = direct web request, 10.0 = officially referred by a General Practitioner. "
+            "Maps from appointments_pool.referral_source: 'direct'→1.0, 'doctor_referred'→10.0"
+        ),
+    )
 
 
 class DoctorInput(BaseModel):

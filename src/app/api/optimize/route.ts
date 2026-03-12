@@ -33,9 +33,10 @@ export async function POST(request: Request) {
   // Parse parameters from request body
   const body = await request.json().catch(() => ({}))
   const parameters: OptimizerParameters = {
-    lambda1: body.parameters?.lambda1 ?? 10,
-    lambda2: body.parameters?.lambda2 ?? 10,
-    num_reads: body.parameters?.num_reads ?? 1000,
+    lambda1:    body.parameters?.lambda1    ?? 50,
+    lambda2:    body.parameters?.lambda2    ?? 50,
+    lambda4:    body.parameters?.lambda4    ?? 20,
+    num_reads:  body.parameters?.num_reads  ?? 1000,
     num_sweeps: body.parameters?.num_sweeps ?? 500,
   }
 
@@ -61,8 +62,9 @@ export async function POST(request: Request) {
     // ── 2. Fetch pending appointments ──────────────────────
     const { data: pendingAppointments, error: apptError } = await supabase
       .from('appointments_pool')
-      .select('id, patient_id, urgency_level, requested_specialty')
+      .select('id, patient_id, urgency_level, requested_specialty, referral_source')
       .eq('status', 'pending')
+      .order('referral_source', { ascending: true })   // doctor_referred sorts before direct
       .order('urgency_level', { ascending: false })
 
     if (apptError) throw new Error(`Failed to fetch appointments: ${apptError.message}`)
@@ -96,10 +98,19 @@ export async function POST(request: Request) {
     }
 
     // ── 4. Build optimizer payload ─────────────────────────
+    // Map referral_source → R_i multiplier for the QUBO model
+    // 'doctor_referred' = GP interconsulta → R_i = 10 (absolute mathematical priority)
+    // 'direct'          = patient self-scheduled → R_i = 1
+    const REFERRAL_MULTIPLIER: Record<string, number> = {
+      doctor_referred: 10,
+      direct:          1,
+    }
+
     const patients: OptimizerPatientInput[] = pendingAppointments.map(a => ({
-      id: a.id,
-      urgency: a.urgency_level,
-      specialty: a.requested_specialty,
+      id:                  a.id,
+      urgency:             a.urgency_level,
+      specialty:           a.requested_specialty,
+      referral_multiplier: REFERRAL_MULTIPLIER[(a as { referral_source?: string }).referral_source ?? 'direct'] ?? 1,
     }))
 
     const doctorInputs: OptimizerDoctorInput[] = doctors.map(d => ({

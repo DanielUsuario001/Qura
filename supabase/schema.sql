@@ -95,6 +95,10 @@ CREATE INDEX idx_doctors_specialty_trgm ON doctors_data USING GIN (specialty gin
 -- TABLE: appointments_pool
 -- The queue that feeds the QUBO optimizer
 -- ============================================================
+-- Referral source: direct web request vs. official GP interconsulta (MINSA/EsSalud model)
+-- Maps to R_i in the QUBO model: 'direct'→1.0, 'doctor_referred'→10.0
+CREATE TYPE referral_source_type AS ENUM ('direct', 'doctor_referred');
+
 CREATE TABLE appointments_pool (
   id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   patient_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -106,6 +110,10 @@ CREATE TABLE appointments_pool (
   inserted_by_admin   UUID REFERENCES users(id) ON DELETE SET NULL,
   preferred_date      DATE,
   notes               TEXT,
+  -- R_i parameter: 'direct' = patient self-scheduled (R=1), 'doctor_referred' = GP interconsulta (R=10)
+  referral_source     referral_source_type NOT NULL DEFAULT 'direct',
+  -- Doctor who issued the referral (only populated when referral_source = 'doctor_referred')
+  referred_by_doctor  UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
