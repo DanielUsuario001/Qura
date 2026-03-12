@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState } from 'react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
@@ -56,12 +57,7 @@ export function DashboardLayout({ children, role, userName, navItems }: Dashboar
         {/* Brand */}
         <div className="px-5 py-5 border-b border-slate-800/80">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-sky-600 flex items-center justify-center shrink-0 shadow shadow-sky-600/30">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round"
-                  d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-              </svg>
-            </div>
+            <Image src="/logo.png" alt="Qura" width={32} height={32} className="rounded-lg shrink-0" />
             <div>
               <p className="text-white font-bold text-sm leading-none tracking-tight">Qura Health</p>
               <p className="text-slate-500 text-xs mt-0.5">v1.0</p>
