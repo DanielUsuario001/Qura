@@ -280,8 +280,10 @@ export function PatientDashboardClient({ userName, userId, initialAppointments }
                           <p className="text-slate-500 text-xs mb-0.5">Fecha y hora</p>
                           <p className="text-sky-300 text-sm font-medium">
                             {new Date(schedule.scheduled_datetime).toLocaleString('es-PE', {
-                              weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+                              weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+                              timeZone: 'UTC'
                             })}
+                            <span className="text-slate-500 text-xs ml-1">UTC</span>
                           </p>
                         </div>
                         <div>
