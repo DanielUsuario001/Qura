@@ -9,9 +9,9 @@ import type {
   AvailableSlot,
 } from '@/lib/types'
 
-const OPTIMIZER_URL = process.env.OPTIMIZER_SERVICE_URL ?? 'http://localhost:8000'
-
 export async function POST(request: Request) {
+  // Leer en runtime (no nivel módulo) para evitar que Turbopack cachee el valor antiguo
+  const OPTIMIZER_URL = process.env.OPTIMIZER_SERVICE_URL ?? 'http://127.0.0.1:8000'
   const supabase = await createServerSupabaseClient()
 
   // Auth check — only admins can trigger optimization
