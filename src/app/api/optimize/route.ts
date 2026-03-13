@@ -1,5 +1,6 @@
 import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase-server'
 import { NextResponse } from 'next/server'
+import http from 'http'
 import type {
   OptimizerPatientInput,
   OptimizerDoctorInput,
@@ -8,6 +9,28 @@ import type {
   OptimizerParameters,
   AvailableSlot,
 } from '@/lib/types'
+
+function httpPost(url: string, body: string): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url)
+    const options = {
+      hostname: parsed.hostname,
+      port: parseInt(parsed.port || '80'),
+      path: parsed.pathname,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    }
+    const req = http.request(options, (res) => {
+      let data = ''
+      res.on('data', (chunk) => { data += chunk })
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, text: data }))
+    })
+    req.on('error', reject)
+    req.setTimeout(120_000, () => { req.destroy(new Error('timeout')) })
+    req.write(body)
+    req.end()
+  })
+}
 
 export async function POST(request: Request) {
   // Leer en runtime (no nivel módulo) para evitar que Turbopack cachee el valor antiguo
@@ -133,15 +156,10 @@ export async function POST(request: Request) {
       optimizer_run_id: optimizerRunId,
     }
 
-    // ── 5. Call Python microservice ────────────────────────
-    let solverResponse: Response
+    // ── 5. Call Python microservice (http nativo — evita el fetch parchado de Next.js) ──
+    let solverRaw: { status: number; text: string }
     try {
-      solverResponse = await fetch(`${OPTIMIZER_URL}/solve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(optimizerRequest),
-        signal: AbortSignal.timeout(120_000), // 2 min timeout for large problems
-      })
+      solverRaw = await httpPost(`${OPTIMIZER_URL}/solve`, JSON.stringify(optimizerRequest))
     } catch (fetchErr) {
       const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr)
       throw new Error(
@@ -151,12 +169,11 @@ export async function POST(request: Request) {
       )
     }
 
-    if (!solverResponse.ok) {
-      const errText = await solverResponse.text()
-      throw new Error(`Optimizer service error (${solverResponse.status}): ${errText}`)
+    if (solverRaw.status < 200 || solverRaw.status >= 300) {
+      throw new Error(`Optimizer service error (${solverRaw.status}): ${solverRaw.text}`)
     }
 
-    const optimizerResult: OptimizerResponse = await solverResponse.json()
+    const optimizerResult: OptimizerResponse = JSON.parse(solverRaw.text)
     const { assignments, summary } = optimizerResult
 
     // ── 6. Persist assignments to schedules table ──────────
