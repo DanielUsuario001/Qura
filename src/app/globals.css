@@ -25,3 +25,72 @@ body {
 ::-webkit-scrollbar-track { background: #0f172a; }
 ::-webkit-scrollbar-thumb { background: #0369a1; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #0ea5e9; }
+
+/* ── FullCalendar — tema claro celeste ──────────────────── */
+.qura-calendar .fc {
+  font-family: inherit;
+  font-size: 0.875rem;
+}
+.qura-calendar .fc-theme-standard td,
+.qura-calendar .fc-theme-standard th,
+.qura-calendar .fc-theme-standard .fc-scrollgrid {
+  border-color: #bae6fd;
+}
+.qura-calendar .fc .fc-daygrid-day {
+  background: #fff;
+}
+.qura-calendar .fc .fc-daygrid-day:hover {
+  background: #f0f9ff;
+  cursor: pointer;
+}
+.qura-calendar .fc .fc-daygrid-day.fc-day-today {
+  background: #e0f2fe !important;
+}
+.qura-calendar .fc .fc-col-header-cell {
+  background: #f0f9ff;
+  color: #0369a1;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 4px;
+}
+.qura-calendar .fc .fc-toolbar-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0c4a6e;
+}
+.qura-calendar .fc .fc-button {
+  background: #0ea5e9 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  font-size: 0.75rem !important;
+  padding: 5px 10px !important;
+  font-weight: 600 !important;
+}
+.qura-calendar .fc .fc-button:hover {
+  background: #0284c7 !important;
+}
+.qura-calendar .fc .fc-button-active {
+  background: #0369a1 !important;
+}
+.qura-calendar .fc .fc-daygrid-event {
+  border-radius: 0 !important;
+  font-size: 0.7rem;
+  padding: 1px 4px;
+  border: none !important;
+  font-weight: 500;
+}
+.qura-calendar .fc .fc-daygrid-day-number {
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.qura-calendar .fc .fc-day-other .fc-daygrid-day-number {
+  color: #94a3b8;
+}
+.qura-calendar .fc .fc-more-link {
+  color: #0369a1;
+  font-size: 0.7rem;
+  font-weight: 600;
+}

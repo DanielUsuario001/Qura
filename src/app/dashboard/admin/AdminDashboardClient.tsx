@@ -1,9 +1,16 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import type { AdminPendingAppointment } from '@/lib/types'
+
+// FullCalendar requires client-only rendering
+const FullCalendar = dynamic(() => import('@fullcalendar/react'), { ssr: false })
+import dayGridPlugin from '@fullcalendar/daygrid'
+import interactionPlugin from '@fullcalendar/interaction'
+import esLocale from '@fullcalendar/core/locales/es'
 
 export interface ScheduledAppointment {
   id: string
@@ -16,12 +23,6 @@ export interface ScheduledAppointment {
   specialty: string
   urgency_level: number
 }
-
-const SPECIALTIES = [
-  'Cardiología', 'Neurología', 'Pediatría', 'Traumatología',
-  'Ginecología', 'Medicina Interna', 'Cirugía General',
-  'Oftalmología', 'Dermatología', 'Psiquiatría', 'General',
-]
 
 interface OptimizerRunRow {
   id: string
@@ -49,30 +50,33 @@ const navItems = [
   },
 ]
 
-const STATUS_RUN_CONFIG = {
-  running:   { label: 'Ejecutando',  color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30' },
-  completed: { label: 'Completado',  color: 'bg-green-500/10 text-green-400 border-green-500/30' },
-  failed:    { label: 'Error',       color: 'bg-red-500/10 text-red-400 border-red-500/30' },
+const SPECIALTY_EVENT_COLORS: Record<string, string> = {
+  'Cardiología':       '#ef4444',
+  'Neurología':        '#8b5cf6',
+  'Traumatología':     '#f97316',
+  'Neumología':        '#06b6d4',
+  'Gastroenterología': '#eab308',
+  'Dermatología':      '#ec4899',
+  'Endocrinología':    '#84cc16',
+  'Pediatría':         '#22c55e',
+  'Ginecología':       '#d946ef',
+  'Oftalmología':      '#14b8a6',
+  'Psiquiatría':       '#6366f1',
+  'Medicina Interna':  '#64748b',
+  'Cirugía General':   '#dc2626',
+  'General':           '#0ea5e9',
 }
+const DEFAULT_EVENT_COLOR = '#0ea5e9'
 
-const HOURS = Array.from({ length: 14 }, (_, i) => i + 6) // 06:00 → 19:00 UTC
-
-const SPECIALTY_COLORS: Record<string, string> = {
-  'Cardiología':      'bg-red-500/20 border-red-500/40 text-red-300',
-  'Neurología':       'bg-purple-500/20 border-purple-500/40 text-purple-300',
-  'Traumatología':    'bg-orange-500/20 border-orange-500/40 text-orange-300',
-  'Neumología':       'bg-cyan-500/20 border-cyan-500/40 text-cyan-300',
-  'Gastroenterología':'bg-yellow-500/20 border-yellow-500/40 text-yellow-300',
-  'Dermatología':     'bg-pink-500/20 border-pink-500/40 text-pink-300',
-  'Endocrinología':   'bg-lime-500/20 border-lime-500/40 text-lime-300',
-  'Pediatría':        'bg-green-500/20 border-green-500/40 text-green-300',
-  'Ginecología':      'bg-fuchsia-500/20 border-fuchsia-500/40 text-fuchsia-300',
-  'Oftalmología':     'bg-teal-500/20 border-teal-500/40 text-teal-300',
-}
-const DEFAULT_COLOR = 'bg-sky-500/20 border-sky-500/40 text-sky-300'
+const SPECIALTIES = [
+  'Cardiología', 'Neurología', 'Pediatría', 'Traumatología',
+  'Ginecología', 'Medicina Interna', 'Cirugía General',
+  'Oftalmología', 'Dermatología', 'Psiquiatría', 'General',
+]
 
 export function AdminDashboardClient({
-  userName, adminId, initialPendingAppointments, initialOptimizerRuns, initialScheduledAppointments, metrics
+  userName, adminId, initialPendingAppointments, initialOptimizerRuns,
+  initialScheduledAppointments, metrics
 }: Props) {
   const [pendingAppointments, setPendingAppointments] = useState(initialPendingAppointments)
   const [optimizerRuns, setOptimizerRuns] = useState(initialOptimizerRuns)
@@ -81,31 +85,10 @@ export function AdminDashboardClient({
   const [running, setRunning] = useState(false)
   const [runResult, setRunResult] = useState<string | null>(null)
   const [showWalkIn, setShowWalkIn] = useState(false)
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [selectedAppt, setSelectedAppt] = useState<ScheduledAppointment | null>(null)
+  const [activeTab, setActiveTab] = useState<'calendar' | 'pending' | 'history'>('calendar')
 
-  // Calendar state
-  const [calendarView, setCalendarView] = useState<'agenda' | 'pending'>('pending')
-
-  // Group scheduled appointments by date (using UTC date to match optimizer slots)
-  const appointmentsByDate = useMemo(() => {
-    const map = new Map<string, ScheduledAppointment[]>()
-    for (const appt of scheduledAppointments) {
-      const dt = new Date(appt.scheduled_datetime)
-      // Use UTC date so days match how the optimizer stored them
-      const date = dt.toISOString().slice(0, 10)
-      if (!map.has(date)) map.set(date, [])
-      map.get(date)!.push(appt)
-    }
-    return map
-  }, [scheduledAppointments])
-
-  const calendarDates = useMemo(() =>
-    Array.from(appointmentsByDate.keys()).sort(), [appointmentsByDate])
-
-  const [selectedDate, setSelectedDate] = useState<string>(() =>
-    calendarDates[0] ?? new Date().toISOString().slice(0, 10)
-  )
-
-  // Walk-in form state
   const [wiSpecialty, setWiSpecialty] = useState('General')
   const [wiUrgency, setWiUrgency] = useState(7)
   const [wiSymptoms, setWiSymptoms] = useState('')
@@ -115,565 +98,432 @@ export function AdminDashboardClient({
 
   const supabase = createClient()
 
+  // Build FullCalendar events from scheduled appointments
+  const calendarEvents = useMemo(() => scheduledAppointments.map(appt => ({
+    id: appt.id,
+    title: `${appt.patient_name} — ${appt.specialty}`,
+    start: appt.scheduled_datetime,
+    color: appt.completed_at
+      ? '#94a3b8'
+      : (SPECIALTY_EVENT_COLORS[appt.specialty] ?? DEFAULT_EVENT_COLOR),
+    extendedProps: appt,
+    classNames: appt.completed_at ? ['opacity-60'] : [],
+  })), [scheduledAppointments])
+
+  // Appointments for the selected day
+  const dayAppointments = useMemo(() => {
+    if (!selectedDate) return []
+    return scheduledAppointments
+      .filter(a => a.scheduled_datetime.slice(0, 10) === selectedDate)
+      .sort((a, b) => a.scheduled_datetime.localeCompare(b.scheduled_datetime))
+  }, [selectedDate, scheduledAppointments])
+
+  const handleDateClick = useCallback((info: { dateStr: string }) => {
+    setSelectedDate(info.dateStr)
+    setSelectedAppt(null)
+  }, [])
+
+  const handleEventClick = useCallback((info: { event: { extendedProps: ScheduledAppointment } }) => {
+    const appt = info.event.extendedProps
+    setSelectedDate(appt.scheduled_datetime.slice(0, 10))
+    setSelectedAppt(appt)
+  }, [])
+
+  async function handleMarkComplete(scheduleId: string, appointmentId: string) {
+    const now = new Date().toISOString()
+    const { error } = await supabase.from('schedules').update({ completed_at: now }).eq('id', scheduleId)
+    if (!error) {
+      await supabase.from('appointments_pool').update({ status: 'completed' }).eq('id', appointmentId)
+      setScheduledAppointments(prev => prev.map(s => s.id === scheduleId ? { ...s, completed_at: now } : s))
+      if (selectedAppt?.id === scheduleId) setSelectedAppt({ ...selectedAppt, completed_at: now })
+    }
+  }
+
   async function handleRunOptimizer() {
     setRunning(true)
     setRunResult(null)
-
     try {
       const response = await fetch('/api/optimize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          parameters: { lambda1: 10, lambda2: 10, num_reads: 1000, num_sweeps: 500 }
-        }),
+        body: JSON.stringify({ parameters: { lambda1: 10, lambda2: 10, num_reads: 1000, num_sweeps: 500 } }),
       })
-
       const result = await response.json()
-
       if (!response.ok) {
         setRunResult(`Error: ${result.error ?? 'Fallo en la optimización'}`)
       } else {
-        const summary = result.summary
-        setRunResult(
-          `Optimización completada: ${summary?.assigned ?? 0} citas asignadas, ${summary?.unassigned ?? 0} sin asignar. Energía: ${summary?.energy?.toFixed(2) ?? '—'}`
-        )
-        // Refresh runs list
-        const { data: newRuns } = await supabase
-          .from('optimizer_runs')
-          .select('id, run_at, status, result_summary, triggered_by, duration_ms')
-          .order('run_at', { ascending: false })
-          .limit(10)
-        if (newRuns) setOptimizerRuns(newRuns.map(r => ({
-          ...r,
-          result_summary: r.result_summary as Record<string, number> | null,
-        })))
-
-        // Remove newly scheduled appointments from pending view
-        const { data: stillPending } = await supabase
-          .from('admin_pending_appointments')
-          .select('*')
-          .order('urgency_level', { ascending: false })
-        if (stillPending) setPendingAppointments(stillPending as import('@/lib/types').AdminPendingAppointment[])
-
-        // Refresh calendar — reload page to get service-role scheduled data
+        const s = result.summary
+        setRunResult(`✓ ${s?.assigned ?? 0} citas asignadas, ${s?.unassigned ?? 0} sin asignar`)
         window.location.reload()
       }
     } catch {
       setRunResult('Error de red: no se pudo conectar con el microservicio.')
     }
-
     setRunning(false)
-  }
-
-  async function handleMarkComplete(scheduleId: string, appointmentId: string) {
-    const now = new Date().toISOString()
-    const { error } = await supabase
-      .from('schedules')
-      .update({ completed_at: now })
-      .eq('id', scheduleId)
-
-    if (!error) {
-      await supabase
-        .from('appointments_pool')
-        .update({ status: 'completed' })
-        .eq('id', appointmentId)
-
-      setScheduledAppointments(prev =>
-        prev.map(s => s.id === scheduleId ? { ...s, completed_at: now } : s)
-      )
-    }
   }
 
   async function handleWalkInSubmit(e: React.FormEvent) {
     e.preventDefault()
     setWiSubmitting(true)
     setWiError(null)
-
-    // Find patient by email
-    const { data: patientUser } = await supabase
-      .from('users')
-      .select('id')
-      .eq('email', wiPatientEmail)
-      .eq('role', 'patient')
-      .single()
-
-    if (!patientUser) {
-      setWiError('No se encontró un paciente con ese correo.')
-      setWiSubmitting(false)
-      return
-    }
-
-    const { error } = await supabase
-      .from('appointments_pool')
-      .insert({
-        patient_id: (patientUser as { id: string }).id,
-        requested_specialty: wiSpecialty,
-        urgency_level: wiUrgency,
-        symptoms: wiSymptoms || null,
-        walk_in: true,
-        inserted_by_admin: adminId,
-      })
-
-    if (error) {
-      setWiError(error.message)
-      setWiSubmitting(false)
-      return
-    }
-
-    // Refresh pending list
-    const { data: updatedPending } = await supabase
-      .from('admin_pending_appointments')
-      .select('*')
-      .order('urgency_level', { ascending: false })
-    if (updatedPending) setPendingAppointments(updatedPending as import('@/lib/types').AdminPendingAppointment[])
-
+    const { data: patientUser } = await supabase.from('users').select('id').eq('email', wiPatientEmail).eq('role', 'patient').single()
+    if (!patientUser) { setWiError('No se encontró un paciente con ese correo.'); setWiSubmitting(false); return }
+    const { error } = await supabase.from('appointments_pool').insert({
+      patient_id: (patientUser as { id: string }).id,
+      requested_specialty: wiSpecialty,
+      urgency_level: wiUrgency,
+      symptoms: wiSymptoms || null,
+      walk_in: true,
+      inserted_by_admin: adminId,
+    })
+    if (error) { setWiError(error.message); setWiSubmitting(false); return }
+    const { data: newPending } = await supabase.from('admin_pending_appointments').select('*').order('urgency_level', { ascending: false })
+    if (newPending) setPendingAppointments(newPending as AdminPendingAppointment[])
     setShowWalkIn(false)
-    setWiSpecialty('General')
-    setWiUrgency(7)
-    setWiSymptoms('')
-    setWiPatientEmail('')
+    setWiPatientEmail(''); setWiSpecialty('General'); setWiUrgency(7); setWiSymptoms('')
     setWiSubmitting(false)
   }
 
-  const filteredAppointments = pendingAppointments.filter(a => {
-    if (filterUrgency !== null && a.urgency_level < filterUrgency) return false
-    return true
-  })
+  const filteredPending = pendingAppointments.filter(a =>
+    filterUrgency === null || a.urgency_level >= filterUrgency
+  )
 
   return (
-    <DashboardLayout role="admin" userName={userName} navItems={navItems}>
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="flex items-start justify-between mb-8">
-          <div>
-            <h1 className="text-2xl font-bold text-white">Panel de Administración</h1>
-            <p className="text-slate-400 mt-1">Gestión hospitalaria y optimización cuántica de agendas</p>
-          </div>
-          <div className="flex gap-3">
-            <button
-              onClick={() => setShowWalkIn(true)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-lg transition text-sm"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-              Walk-in
-            </button>
-            <button
-              onClick={handleRunOptimizer}
-              disabled={running}
-              className="flex items-center gap-2 px-5 py-2.5 bg-sky-700 hover:bg-sky-600 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition text-sm shadow-lg shadow-sky-900/30"
-            >
-              {running ? (
-                <>
-                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Procesando...
-                </>
-              ) : (
-                <>
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                  Ejecutar Optimización Cuántica
-                </>
-              )}
-            </button>
+    <DashboardLayout role="admin" userName={userName} navItems={navItems} lightTheme>
+      <div className="min-h-screen bg-sky-50">
+        {/* ── Top bar ─────────────────────────────────────────── */}
+        <div className="bg-white border-b border-sky-200 px-6 py-4">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <div>
+              <h1 className="text-xl font-bold text-sky-900">Panel de Administración</h1>
+              <p className="text-sky-500 text-sm mt-0.5">Gestión hospitalaria y optimización cuántica de agendas</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowWalkIn(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-sky-300 text-sky-700 font-medium text-sm hover:bg-sky-50 transition"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                Walk-in
+              </button>
+              <button
+                onClick={handleRunOptimizer}
+                disabled={running}
+                className="flex items-center gap-2 px-4 py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-60 text-white font-semibold text-sm transition"
+              >
+                {running ? (
+                  <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>Optimizando...</>
+                ) : (
+                  <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>Ejecutar Optimización Cuántica</>
+                )}
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Run result banner */}
-        {runResult && (
-          <div className={`mb-6 flex items-start gap-3 px-5 py-4 rounded-xl border ${runResult.startsWith('Error') ? 'bg-red-500/10 border-red-500/30 text-red-300' : 'bg-green-500/10 border-green-500/30 text-green-300'}`}>
-            <svg className="w-5 h-5 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              {runResult.startsWith('Error') ? (
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              ) : (
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              )}
-            </svg>
-            <p className="text-sm">{runResult}</p>
-            <button onClick={() => setRunResult(null)} className="ml-auto text-slate-500 hover:text-white">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+        <div className="max-w-7xl mx-auto px-6 py-5">
+          {/* Result banner */}
+          {runResult && (
+            <div className={`mb-4 px-4 py-2.5 border text-sm flex items-center justify-between ${
+              runResult.startsWith('Error') ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+            }`}>
+              <span>{runResult}</span>
+              <button onClick={() => setRunResult(null)} className="text-current opacity-50 hover:opacity-100">✕</button>
+            </div>
+          )}
+
+          {/* ── Metrics ──────────────────────────────────────── */}
+          <div className="grid grid-cols-3 gap-4 mb-5">
+            {[
+              { label: 'Pendientes de asignar', value: metrics.totalPending, color: 'text-amber-600', bg: 'border-amber-200' },
+              { label: 'Citas programadas',     value: metrics.totalScheduled, color: 'text-sky-600', bg: 'border-sky-200' },
+              { label: 'Completadas hoy',       value: metrics.completedToday, color: 'text-emerald-600', bg: 'border-emerald-200' },
+            ].map(m => (
+              <div key={m.label} className={`bg-white border ${m.bg} p-4`}>
+                <p className="text-slate-500 text-xs font-medium uppercase tracking-wide">{m.label}</p>
+                <p className={`text-3xl font-bold mt-1 ${m.color}`}>{m.value}</p>
+              </div>
+            ))}
           </div>
-        )}
 
-        {/* Metrics */}
-        <div className="grid grid-cols-3 gap-5 mb-8">
-          {[
-            {
-              label: 'Pendientes de asignar',
-              value: metrics.totalPending,
-              color: 'text-amber-400',
-              bg: 'bg-amber-400/10 border-amber-400/20',
-              icon: (
-                <svg className="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              ),
-            },
-            {
-              label: 'Citas programadas',
-              value: metrics.totalScheduled,
-              color: 'text-sky-400',
-              bg: 'bg-sky-400/10 border-sky-400/20',
-              icon: (
-                <svg className="w-5 h-5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-                </svg>
-              ),
-            },
-            {
-              label: 'Completadas hoy',
-              value: metrics.completedToday,
-              color: 'text-emerald-400',
-              bg: 'bg-emerald-400/10 border-emerald-400/20',
-              icon: (
-                <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              ),
-            },
-          ].map((m) => (
-            <div key={m.label} className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 hover:border-sky-900/60 transition">
-              <div className={`inline-flex items-center justify-center w-9 h-9 rounded-lg border mb-3 ${m.bg}`}>
-                {m.icon}
-              </div>
-              <p className="text-slate-400 text-sm mb-1">{m.label}</p>
-              <p className={`text-3xl font-bold tracking-tight ${m.color}`}>{m.value}</p>
-            </div>
-          ))}
-        </div>
+          {/* ── Tab navigation ───────────────────────────────── */}
+          <div className="flex border-b border-sky-200 mb-0 bg-white">
+            {[
+              { key: 'calendar', label: 'Calendario de Citas' },
+              { key: 'pending',  label: `Cola Pendiente (${filteredPending.length})` },
+              { key: 'history',  label: 'Historial de Optimizaciones' },
+            ].map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key as typeof activeTab)}
+                className={`px-5 py-3 text-sm font-medium border-b-2 transition -mb-px ${
+                  activeTab === tab.key
+                    ? 'border-sky-600 text-sky-700 bg-white'
+                    : 'border-transparent text-slate-500 hover:text-sky-600 hover:bg-sky-50'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
 
-        <div className="grid grid-cols-5 gap-6">
-          {/* Pending appointments table */}
-          <div className="col-span-3">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-white font-semibold text-lg">Cola de Citas Pendientes</h2>
-              <div className="flex items-center gap-2">
-                <span className="text-slate-400 text-sm">Urgencia mín.:</span>
-                <select
-                  value={filterUrgency ?? ''}
-                  onChange={(e) => setFilterUrgency(e.target.value ? Number(e.target.value) : null)}
-                  className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Todas</option>
-                  {[1,3,5,7,8].map(v => <option key={v} value={v}>{v}+</option>)}
-                </select>
-              </div>
-            </div>
-
-            <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-              {filteredAppointments.length === 0 ? (
-                <div className="text-center py-12">
-                  <p className="text-slate-500">No hay citas pendientes</p>
+          {/* ── Calendar tab ─────────────────────────────────── */}
+          {activeTab === 'calendar' && (
+            <div className="flex gap-4 mt-0">
+              {/* Calendar */}
+              <div className="flex-1 bg-white border border-sky-200 border-t-0">
+                <div className="qura-calendar p-4">
+                  <FullCalendar
+                    plugins={[dayGridPlugin, interactionPlugin]}
+                    initialView="dayGridMonth"
+                    initialDate="2026-01-01"
+                    locale={esLocale}
+                    events={calendarEvents}
+                    dateClick={handleDateClick}
+                    eventClick={handleEventClick}
+                    headerToolbar={{
+                      left: 'prev,next today',
+                      center: 'title',
+                      right: 'dayGridMonth',
+                    }}
+                    validRange={{ start: '2026-01-01', end: '2026-12-31' }}
+                    height="auto"
+                    dayMaxEvents={3}
+                    eventDisplay="block"
+                    eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' }}
+                  />
                 </div>
+              </div>
+
+              {/* Day detail panel */}
+              <div className="w-80 shrink-0">
+                {selectedDate ? (
+                  <div className="bg-white border border-sky-200 border-t-0 h-full">
+                    <div className="bg-sky-600 text-white px-4 py-3">
+                      <p className="font-semibold text-sm">
+                        {new Date(selectedDate + 'T12:00:00Z').toLocaleDateString('es-PE', {
+                          weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC'
+                        })}
+                      </p>
+                      <p className="text-sky-200 text-xs mt-0.5">{dayAppointments.length} cita{dayAppointments.length !== 1 ? 's' : ''}</p>
+                    </div>
+                    <div className="overflow-y-auto max-h-[600px]">
+                      {dayAppointments.length === 0 ? (
+                        <div className="p-6 text-center text-slate-400 text-sm">Sin citas programadas</div>
+                      ) : (
+                        dayAppointments.map(appt => {
+                          const isSelected = selectedAppt?.id === appt.id
+                          const isCompleted = !!appt.completed_at
+                          const color = SPECIALTY_EVENT_COLORS[appt.specialty] ?? DEFAULT_EVENT_COLOR
+                          return (
+                            <div
+                              key={appt.id}
+                              onClick={() => setSelectedAppt(isSelected ? null : appt)}
+                              className={`border-b border-sky-100 cursor-pointer transition ${
+                                isSelected ? 'bg-sky-50' : 'hover:bg-sky-50/50'
+                              } ${isCompleted ? 'opacity-60' : ''}`}
+                            >
+                              <div className="flex items-center gap-3 px-4 py-3">
+                                <div className="w-1 self-stretch rounded-full shrink-0" style={{ backgroundColor: color }} />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between gap-1">
+                                    <span className="text-xs font-mono text-sky-600 font-semibold">
+                                      {new Date(appt.scheduled_datetime).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })} UTC
+                                    </span>
+                                    {isCompleted && <span className="text-xs text-emerald-500">✓</span>}
+                                  </div>
+                                  <p className="text-sm font-medium text-slate-800 truncate">{appt.patient_name}</p>
+                                  <p className="text-xs text-slate-500 truncate">{appt.specialty} · Dr. {appt.doctor_name}</p>
+                                  {appt.room && <p className="text-xs text-slate-400">Sala {appt.room}</p>}
+                                </div>
+                                <div className={`text-xs font-bold px-1.5 py-0.5 shrink-0 ${
+                                  appt.urgency_level >= 8 ? 'bg-red-100 text-red-600' :
+                                  appt.urgency_level >= 5 ? 'bg-amber-100 text-amber-600' :
+                                  'bg-green-100 text-green-600'
+                                }`}>
+                                  U{appt.urgency_level}
+                                </div>
+                              </div>
+                              {isSelected && !isCompleted && (
+                                <div className="px-4 pb-3">
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleMarkComplete(appt.id, appt.appointment_id) }}
+                                    className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition"
+                                  >
+                                    ✓ Marcar como completada
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-white border border-sky-200 border-t-0 p-6 text-center">
+                    <svg className="w-10 h-10 text-sky-200 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    <p className="text-slate-400 text-sm">Selecciona un día en el calendario</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Pending tab ──────────────────────────────────── */}
+          {activeTab === 'pending' && (
+            <div className="bg-white border border-sky-200 border-t-0">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-sky-100">
+                <p className="text-sm font-medium text-slate-700">Cola de Citas Pendientes</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500">Urgencia mín.:</span>
+                  <select
+                    value={filterUrgency ?? ''}
+                    onChange={e => setFilterUrgency(e.target.value ? Number(e.target.value) : null)}
+                    className="text-xs border border-sky-200 text-slate-600 px-2 py-1 bg-white"
+                  >
+                    <option value="">Todas</option>
+                    {[3,5,7,9].map(v => <option key={v} value={v}>{v}+</option>)}
+                  </select>
+                </div>
+              </div>
+              <table className="w-full text-sm">
+                <thead className="bg-sky-50">
+                  <tr>
+                    {['Paciente', 'Especialidad', 'Urgencia', 'Origen', 'Registrado'].map(h => (
+                      <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-sky-700 uppercase tracking-wide border-b border-sky-100">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredPending.length === 0 ? (
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">No hay citas pendientes</td></tr>
+                  ) : filteredPending.map(a => (
+                    <tr key={a.id} className="border-b border-sky-50 hover:bg-sky-50/50">
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-slate-800">{a.patient_name}</p>
+                        <p className="text-xs text-slate-400">{a.patient_email}</p>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{a.requested_specialty}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-block w-7 h-7 text-xs font-bold leading-7 text-center ${
+                          a.urgency_level >= 8 ? 'bg-red-100 text-red-600' :
+                          a.urgency_level >= 5 ? 'bg-amber-100 text-amber-600' :
+                          'bg-green-100 text-green-600'
+                        }`}>{a.urgency_level}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {a.referral_source === 'doctor_referred'
+                          ? <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5">Interconsulta</span>
+                          : <span className="text-xs bg-sky-100 text-sky-600 px-2 py-0.5">Directo</span>
+                        }
+                      </td>
+                      <td className="px-4 py-3 text-slate-400 text-xs">
+                        {new Date(a.created_at).toLocaleDateString('es-PE', { day: '2-digit', month: 'short' })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* ── History tab ──────────────────────────────────── */}
+          {activeTab === 'history' && (
+            <div className="bg-white border border-sky-200 border-t-0">
+              <div className="px-4 py-3 border-b border-sky-100">
+                <p className="text-sm font-medium text-slate-700">Historial de Optimizaciones Cuánticas</p>
+              </div>
+              {optimizerRuns.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 text-sm">Sin ejecuciones registradas</div>
               ) : (
                 <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-800">
-                      <th className="text-left px-4 py-3 text-slate-400 font-medium">Paciente</th>
-                      <th className="text-left px-4 py-3 text-slate-400 font-medium">Especialidad</th>
-                      <th className="text-center px-4 py-3 text-slate-400 font-medium">Urgencia</th>
-                      <th className="text-left px-4 py-3 text-slate-400 font-medium">Registrado</th>
+                  <thead className="bg-sky-50">
+                    <tr>
+                      {['Fecha', 'Estado', 'Asignadas', 'Sin asignar', 'Energía', 'Duración'].map(h => (
+                        <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-sky-700 uppercase tracking-wide border-b border-sky-100">{h}</th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredAppointments.map((appt, idx) => (
-                      <tr key={appt.id} className={`border-b border-slate-800/50 hover:bg-slate-800/30 transition ${idx % 2 === 0 ? '' : 'bg-slate-800/10'}`}>
-                        <td className="px-4 py-3">
-                          <p className="text-white font-medium">{appt.patient_name}</p>
-                          <p className="text-slate-500 text-xs">{appt.patient_email}</p>
-                        </td>
-                        <td className="px-4 py-3 text-slate-300">{appt.requested_specialty}</td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${
-                            appt.urgency_level >= 8 ? 'bg-red-500/20 text-red-400' :
-                            appt.urgency_level >= 5 ? 'bg-yellow-500/20 text-yellow-400' :
-                            'bg-green-500/20 text-green-400'
-                          }`}>
-                            {appt.urgency_level}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-slate-400 text-xs">
-                          {new Date(appt.created_at).toLocaleDateString('es-PE', { day: '2-digit', month: 'short' })}
-                        </td>
-                      </tr>
-                    ))}
+                    {optimizerRuns.map(run => {
+                      const summary = run.result_summary as { assigned?: number; unassigned?: number; energy?: number } | null
+                      return (
+                        <tr key={run.id} className="border-b border-sky-50 hover:bg-sky-50/50">
+                          <td className="px-4 py-3 text-slate-600 text-xs">
+                            {new Date(run.run_at).toLocaleString('es-PE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`text-xs px-2 py-0.5 font-medium ${
+                              run.status === 'completed' ? 'bg-emerald-100 text-emerald-700' :
+                              run.status === 'failed'    ? 'bg-red-100 text-red-600' :
+                              'bg-amber-100 text-amber-600'
+                            }`}>{run.status === 'completed' ? 'Completado' : run.status === 'failed' ? 'Error' : 'Ejecutando'}</span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-700 font-medium">{summary?.assigned ?? '—'}</td>
+                          <td className="px-4 py-3 text-slate-500">{summary?.unassigned ?? '—'}</td>
+                          <td className="px-4 py-3 text-slate-500 font-mono text-xs">{typeof summary?.energy === 'number' ? summary.energy.toFixed(0) : '—'}</td>
+                          <td className="px-4 py-3 text-slate-400 text-xs">{run.duration_ms ? `${(run.duration_ms / 1000).toFixed(1)}s` : '—'}</td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               )}
             </div>
-          </div>
-
-          {/* Optimizer run history */}
-          <div className="col-span-2">
-            <h2 className="text-white font-semibold text-lg mb-4">Historial de Optimizaciones</h2>
-            <div className="space-y-3">
-              {optimizerRuns.length === 0 ? (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center">
-                  <p className="text-slate-500 text-sm">Sin ejecuciones previas</p>
-                </div>
-              ) : (
-                optimizerRuns.map((run) => {
-                  const cfg = STATUS_RUN_CONFIG[run.status as keyof typeof STATUS_RUN_CONFIG] ?? STATUS_RUN_CONFIG.completed
-                  const summary = run.result_summary as Record<string, number> | null
-                  return (
-                    <div key={run.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-slate-700 transition">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${cfg.color}`}>
-                          {cfg.label}
-                        </span>
-                        <span className="text-slate-500 text-xs">
-                          {new Date(run.run_at).toLocaleString('es-PE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                      {summary && (
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2 text-xs">
-                          <span className="text-slate-400">Asignadas: <span className="text-green-400 font-medium">{summary.assigned}</span></span>
-                          <span className="text-slate-400">Sin asignar: <span className="text-yellow-400 font-medium">{summary.unassigned}</span></span>
-                          {summary.energy !== undefined && (
-                            <span className="text-slate-400 col-span-2">Energía QUBO: <span className="text-sky-400 font-mono">{Number(summary.energy).toFixed(3)}</span></span>
-                          )}
-                        </div>
-                      )}
-                      {run.duration_ms && (
-                        <p className="text-slate-600 text-xs mt-2">{(run.duration_ms / 1000).toFixed(1)}s</p>
-                      )}
-                    </div>
-                  )
-                })
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* ── Agenda / Calendar View ───────────────────────── */}
-        <div className="mt-8">
-          {/* Tab selector */}
-          <div className="flex items-center gap-1 mb-5 bg-slate-900 border border-slate-800 rounded-xl p-1 w-fit">
-            <button
-              onClick={() => setCalendarView('pending')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${calendarView === 'pending' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}
-            >
-              Cola Pendiente
-            </button>
-            <button
-              onClick={() => setCalendarView('agenda')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 ${calendarView === 'agenda' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-              </svg>
-              Agenda por Día
-              {scheduledAppointments.length > 0 && (
-                <span className="bg-sky-600 text-white text-xs px-1.5 py-0.5 rounded-full">{scheduledAppointments.length}</span>
-              )}
-            </button>
-          </div>
-
-          {calendarView === 'agenda' && (
-            <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-              {scheduledAppointments.length === 0 ? (
-                <div className="text-center py-16">
-                  <svg className="w-10 h-10 text-slate-700 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-                  </svg>
-                  <p className="text-slate-500 text-sm">No hay citas programadas aún. Ejecuta la optimización cuántica para asignar citas.</p>
-                </div>
-              ) : (
-                <>
-                  {/* Day selector */}
-                  <div className="flex gap-1 p-3 border-b border-slate-800 overflow-x-auto">
-                    {calendarDates.map(date => {
-                      const d = new Date(date + 'T12:00:00')
-                      const count = appointmentsByDate.get(date)?.length ?? 0
-                      const isSelected = date === selectedDate
-                      return (
-                        <button
-                          key={date}
-                          onClick={() => setSelectedDate(date)}
-                          className={`flex flex-col items-center px-4 py-2 rounded-lg min-w-[70px] transition ${
-                            isSelected ? 'bg-sky-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                          }`}
-                        >
-                          <span className="text-xs font-medium uppercase">
-                            {d.toLocaleDateString('es-PE', { weekday: 'short' })}
-                          </span>
-                          <span className="text-xl font-bold leading-tight">{d.getDate()}</span>
-                          <span className="text-xs opacity-70">
-                            {d.toLocaleDateString('es-PE', { month: 'short' })}
-                          </span>
-                          <span className={`mt-1 text-xs px-1.5 py-0.5 rounded-full ${isSelected ? 'bg-white/20' : 'bg-slate-700'}`}>
-                            {count}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-
-                  {/* Time grid */}
-                  <div className="overflow-y-auto max-h-[600px]">
-                    {HOURS.map(hour => {
-                      const dayAppts = (appointmentsByDate.get(selectedDate) ?? [])
-                        .filter(a => new Date(a.scheduled_datetime).getUTCHours() === hour)
-                        .sort((a, b) => a.scheduled_datetime.localeCompare(b.scheduled_datetime))
-
-                      return (
-                        <div key={hour} className="flex border-b border-slate-800/60 min-h-[56px]">
-                          {/* Hour label */}
-                          <div className="w-20 shrink-0 px-3 py-3 text-right">
-                            <span className="text-slate-500 text-xs font-mono">
-                              {String(hour).padStart(2, '0')}:00
-                            </span>
-                            <span className="text-slate-700 text-xs block">UTC</span>
-                          </div>
-                          {/* Events */}
-                          <div className="flex-1 px-3 py-2 flex flex-wrap gap-2">
-                            {dayAppts.length === 0 ? (
-                              <div className="h-full w-full border-l border-slate-800/40" />
-                            ) : (
-                              dayAppts.map(appt => {
-                                const dt = new Date(appt.scheduled_datetime)
-                                // Display in UTC since optimizer generates UTC slots
-                                const timeStr = dt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })
-                                const colorClass = SPECIALTY_COLORS[appt.specialty] ?? DEFAULT_COLOR
-                                const isCompleted = !!appt.completed_at
-                                return (
-                                  <div
-                                    key={appt.id}
-                                    className={`flex flex-col px-3 py-2 rounded-lg border text-xs min-w-[180px] max-w-[260px] ${colorClass} ${isCompleted ? 'opacity-50' : ''}`}
-                                  >
-                                    <div className="flex items-center justify-between gap-2 mb-1">
-                                      <span className="font-mono font-medium">{timeStr}</span>
-                                      {appt.room && (
-                                        <span className="bg-black/20 px-1.5 py-0.5 rounded text-xs">
-                                          Sala {appt.room}
-                                        </span>
-                                      )}
-                                      {isCompleted && (
-                                        <span className="bg-green-500/30 text-green-300 px-1.5 py-0.5 rounded text-xs">✓</span>
-                                      )}
-                                    </div>
-                                    <span className="font-semibold truncate">{appt.patient_name}</span>
-                                    <span className="opacity-80 truncate">{appt.specialty}</span>
-                                    <span className="opacity-60 truncate text-xs mt-0.5">Dr. {appt.doctor_name}</span>
-                                    <div className="mt-1 flex items-center justify-between gap-1">
-                                      <div className="flex items-center gap-1">
-                                        <span className={`w-1.5 h-1.5 rounded-full ${
-                                          appt.urgency_level >= 8 ? 'bg-red-400' :
-                                          appt.urgency_level >= 5 ? 'bg-yellow-400' : 'bg-green-400'
-                                        }`} />
-                                        <span className="opacity-60">Urgencia {appt.urgency_level}</span>
-                                      </div>
-                                      {!isCompleted && (
-                                        <button
-                                          onClick={() => handleMarkComplete(appt.id, appt.appointment_id)}
-                                          className="text-xs px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-300 border border-emerald-500/30 transition font-medium"
-                                        >
-                                          ✓ Completar
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-                                )
-                              })
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </>
-              )}
-            </div>
           )}
         </div>
+      </div>
 
-        {/* Walk-in Modal */}
-        {showWalkIn && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-              <div className="flex items-center justify-between mb-5">
-                <h3 className="text-white font-semibold text-lg">Insertar Walk-in</h3>
-                <button onClick={() => setShowWalkIn(false)} className="text-slate-400 hover:text-white transition">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+      {/* Walk-in Modal */}
+      {showWalkIn && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white border border-sky-200 w-full max-w-md shadow-xl">
+            <div className="bg-sky-600 text-white px-5 py-4 flex items-center justify-between">
+              <h3 className="font-semibold">Insertar Walk-in</h3>
+              <button onClick={() => setShowWalkIn(false)} className="text-sky-200 hover:text-white">✕</button>
+            </div>
+            <form onSubmit={handleWalkInSubmit} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Correo del paciente</label>
+                <input type="email" value={wiPatientEmail} onChange={e => setWiPatientEmail(e.target.value)} required
+                  className="w-full border border-sky-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Especialidad</label>
+                <select value={wiSpecialty} onChange={e => setWiSpecialty(e.target.value)}
+                  className="w-full border border-sky-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-sky-400">
+                  {SPECIALTIES.map(s => <option key={s}>{s}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">
+                  Urgencia: <span className={`font-bold ${wiUrgency >= 8 ? 'text-red-500' : wiUrgency >= 5 ? 'text-amber-500' : 'text-green-500'}`}>{wiUrgency}/10</span>
+                </label>
+                <input type="range" min={1} max={10} value={wiUrgency} onChange={e => setWiUrgency(Number(e.target.value))} className="w-full accent-sky-600" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Síntomas (opcional)</label>
+                <textarea value={wiSymptoms} onChange={e => setWiSymptoms(e.target.value)} rows={2}
+                  className="w-full border border-sky-200 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-sky-400" />
+              </div>
+              {wiError && <p className="text-red-500 text-xs">{wiError}</p>}
+              <div className="flex gap-3 pt-1">
+                <button type="submit" disabled={wiSubmitting}
+                  className="flex-1 py-2.5 bg-sky-600 hover:bg-sky-700 disabled:opacity-60 text-white font-semibold text-sm transition">
+                  {wiSubmitting ? 'Guardando...' : 'Insertar Walk-in'}
+                </button>
+                <button type="button" onClick={() => setShowWalkIn(false)}
+                  className="px-4 py-2.5 border border-sky-200 text-slate-600 hover:bg-sky-50 text-sm transition">
+                  Cancelar
                 </button>
               </div>
-
-              <form onSubmit={handleWalkInSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-1.5">Email del paciente</label>
-                  <input
-                    type="email"
-                    required
-                    value={wiPatientEmail}
-                    onChange={(e) => setWiPatientEmail(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
-                    placeholder="paciente@email.com"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-1.5">Especialidad</label>
-                  <select
-                    value={wiSpecialty}
-                    onChange={(e) => setWiSpecialty(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
-                  >
-                    {SPECIALTIES.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">
-                    Urgencia: <span className="text-sky-400 font-bold">{wiUrgency}/10</span>
-                  </label>
-                  <input
-                    type="range" min={1} max={10}
-                    value={wiUrgency}
-                    onChange={(e) => setWiUrgency(Number(e.target.value))}
-                    className="w-full accent-sky-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-1.5">Síntomas (opcional)</label>
-                  <textarea
-                    value={wiSymptoms}
-                    onChange={(e) => setWiSymptoms(e.target.value)}
-                    rows={2}
-                    className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 transition resize-none"
-                  />
-                </div>
-
-                {wiError && <p className="text-red-400 text-sm">{wiError}</p>}
-
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="submit"
-                    disabled={wiSubmitting}
-                    className="flex-1 py-2.5 bg-sky-700 hover:bg-sky-600 disabled:opacity-60 text-white font-semibold rounded-lg transition"
-                  >
-                    {wiSubmitting ? 'Insertando...' : 'Insertar en Cola'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowWalkIn(false)}
-                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              </form>
-            </div>
+            </form>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </DashboardLayout>
   )
 }

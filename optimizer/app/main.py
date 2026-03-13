@@ -93,9 +93,10 @@ async def solve(payload: OptimizerRequest) -> OptimizerResponse:
     )
 
     if not payload.patients:
+        from .models import ResultSummary
         return OptimizerResponse(
             assignments=[],
-            summary={"assigned": 0, "unassigned": 0, "energy": 0.0, "duration_ms": 0},
+            summary=ResultSummary(assigned=0, unassigned=0, energy=0.0, duration_ms=0),
         )
 
     if not payload.doctors:

@@ -3,15 +3,25 @@ QUBO formulation for clinical scheduling — Peru MINSA/EsSalud referral model.
 
 Hamiltonian H(x) (minimized):
 
-  H = - Σ_{i,j,t | C_{i,j}=1}  (U_i + λ₄·R_i) · x_{i,j,t}     [Terms 1+4 combined]
-      + λ₁ · Σ_{j,t} (Σ_i x_{i,j,t})(Σ_i x_{i,j,t} - 1)        [Term 2: doctor ≤1 patient/slot]
-      + λ₂ · Σ_i (Σ_{j,t} x_{i,j,t} - 1)²                       [Term 3: patient scheduled once]
+  H(x) = - Σ_{i,j,t} (U_i · C_{i,j}) · x_{i,j,t}               [Término 1: urgencia clínica]
+          + λ₁ · Σ_{j,t} Σ_{i≠i'} x_{i,j,t} · x_{i',j,t}       [Término 2: ≤1 paciente/slot/doctor]
+          + λ₂ · Σ_i (Σ_{j,t} x_{i,j,t} - 1)²                   [Término 3: paciente asignado exactamente 1 vez]
+          - λ₄ · Σ_{i,j,t} R_i · x_{i,j,t}                      [Término 4: recompensa interconsulta]
+
+Variables:
+  x_{i,j,t} ∈ {0,1}  — 1 si al paciente i se le asigna el doctor j en el tiempo t
+  U_i (1–10)          — urgencia clínica del paciente
+  C_{i,j} ∈ {0,1}    — compatibilidad de especialidad (filtro estricto)
+  R_i                 — multiplicador de referencia: 1.0 (directo web) | 10.0 (interconsulta MG)
 
 Key design decisions:
-  - C_{i,j} = 1 only when specialties match → Binary variables are ONLY created for
-    valid (i,j,t) triplets, drastically reducing QUBO matrix size.
-  - R_i encodes referral priority: 1.0 for direct web requests, 10.0 for GP referrals.
-  - Terms 1 and 4 are both linear and share the same loop (combined as `peso`).
+  - Solo se crean variables Binary para triplets (i,j,t) donde C_{i,j}=1 Y el doctor
+    tiene disponibilidad en el slot t, reduciendo drásticamente el tamaño de la matriz QUBO.
+  - Términos 1 y 4 son ambos lineales → se combinan en un solo bucle:
+      peso = (U_i · C_{i,j}) + (λ₄ · R_i)
+    Como C_{i,j}=1 para todas las variables creadas: peso = U_i + λ₄ · R_i
+  - R_i=10 con λ₄=20 → recompensa de 200 para interconsultas vs máx 10 de urgencia
+    → prioridad matemática absoluta para pacientes derivados por médico general.
   - Solved with openjij.SASampler (Simulated Annealing).
 """
 from __future__ import annotations
@@ -112,12 +122,16 @@ def build_and_solve(
     if not patients:
         return [], 0.0
 
+    # =========================================================================
+    # PASO 1: DEFINICIÓN DE PARÁMETROS DEL MUNDO REAL
+    # =========================================================================
+    # Establecer datos de entrada: U_i (urgencia), R_i (referencia), C_{i,j}
+    # (compatibilidad), tamaño del problema (I, J, T), límites MAX_*.
     time_slots = generate_time_slots(doctors)
     if not time_slots:
         logger.warning("No time slots generated — check doctor availability config")
         return [], 0.0
 
-    # Hard size limits to prevent memory explosion
     MAX_PATIENTS = 50
     MAX_SLOTS    = 40
     MAX_DOCTORS  = 20
@@ -130,26 +144,21 @@ def build_and_solve(
     J = len(doctors)
     T = len(time_slots)
 
-    max_urgency = max(p.urgency for p in patients) or 1
-    lambda4     = params.lambda4
-
-    # ── Pre-processing: build compatibility matrix C_{i,j} and create only
-    #    Binary variables for feasible (i, j, t) triplets ────────────────────
-    #
-    # C[i][j] = 1  ↔  specialties_match AND doctor is available at ≥1 slot
-    # x_vars[(i,j,t)] = Binary variable  (only if C[i][j]=1 AND available at t)
-
+    # =========================================================================
+    # PASO 2: CREACIÓN DE VARIABLES BINARIAS SIMBÓLICAS
+    # =========================================================================
+    # No crear x_{i,j,t} si C_{i,j}=0. Filtro estricto reduce tamaño de matriz.
+    # C[i][j]=1 ↔ specialties_match Y doctor disponible en al menos un slot.
     x_vars: dict[tuple[int, int, int], object] = {}
 
     for i, patient in enumerate(patients):
         for j, doctor in enumerate(doctors):
-            # Compatibility gate C_{i,j}
             if not specialties_match(patient.specialty, doctor.specialty):
-                continue  # C_{i,j} = 0 → skip entire (i,j) pair
+                continue
 
             for t, slot in enumerate(time_slots):
                 if not doctor_available_at(doctor, slot):
-                    continue  # doctor unavailable at this slot
+                    continue
                 x_vars[(i, j, t)] = Binary(f"x_{i}_{j}_{t}")
 
     total_vars = len(x_vars)
@@ -163,45 +172,46 @@ def build_and_solve(
         logger.warning("No feasible (patient, doctor, slot) combinations found")
         return [], 0.0
 
-    # ── Terms 1 + 4 (combined linear reward) ─────────────────────────────────
-    #
-    # For each valid triplet:  peso = U_i + λ₄·R_i
-    # Contribution to H:       -peso · x_{i,j,t}
-    # (C_{i,j} = 1 for all x_vars, so the product reduces to U_i directly)
+    # =========================================================================
+    # PASO 3: CONSTRUCCIÓN DE LOS COMPONENTES DEL HAMILTONIANO
+    # =========================================================================
+    #   A. Términos lineales: costo/beneficio individual de cada variable.
+    #   B. Términos cuadráticos: interacción entre pares (doctor ≤1 paciente/slot).
+    #   C. Restricciones: paciente asignado exactamente 1 vez.
 
+    # =========================================================================
+    # PASO 4: ASIGNACIÓN DE PESOS (HYPERPARÁMETROS)
+    # Multiplicar cada componente por λ. Placeholder permite tunear sin recompilar.
+    # =========================================================================
+    lambda1 = Placeholder("lambda1")
+    lambda2 = Placeholder("lambda2")
+    lambda4 = Placeholder("lambda4")
+
+    # A. Términos lineales (objetivo + recompensa referencia)
+    # peso = (U_i · C_{i,j}) + (λ₄ · R_i). C_{i,j}=1 en variables creadas.
+    # R_i=10, λ₄=20 → interconsulta suma 200 vs máx 10 de urgencia.
     H_obj = 0.0
     for (i, j, t), x_var in x_vars.items():
-        U_i   = patients[i].urgency / max_urgency
-        R_i   = patients[i].referral_multiplier
-        peso  = U_i + (lambda4 * R_i)
+        U_i  = patients[i].urgency
+        R_i  = patients[i].referral_multiplier
+        peso = U_i + (lambda4 * R_i)
         H_obj -= peso * x_var
 
-    # ── Term 2: doctor sees at most 1 patient per slot (λ₁) ──────────────────
-    #
-    # Penalize occupancy*(occupancy-1) for each (j,t) pair
-    # This equals 0 when occupancy ≤ 1, and grows quadratically above 1.
-
-    lambda1 = Placeholder("lambda1")
+    # B. Términos cuadráticos: penaliza si doctor j tiene >1 paciente en slot t.
+    # occupancy*(occupancy-1) = 0 si ≤1, crece si >1.
     H_doctor = 0.0
-
-    # Group variables by (j, t)
     by_jt: dict[tuple[int, int], list] = defaultdict(list)
     for (i, j, t), x_var in x_vars.items():
         by_jt[(j, t)].append(x_var)
 
     for (j, t), vars_jt in by_jt.items():
         if len(vars_jt) < 2:
-            continue  # at most 1 possible patient → constraint trivially satisfied
+            continue
         occupancy = sum(vars_jt)
         H_doctor += occupancy * (occupancy - 1)
 
-    # ── Term 3: patient scheduled exactly once (λ₂) ───────────────────────────
-    #
-    # Penalize (Σ_{j,t} x_{i,j,t} - 1)² for each patient i.
-
-    lambda2 = Placeholder("lambda2")
+    # C. Restricción: (Σ_{j,t} x_{i,j,t} - 1)² → paciente asignado exactamente 1 vez.
     H_patient = 0.0
-
     by_i: dict[int, list] = defaultdict(list)
     for (i, j, t), x_var in x_vars.items():
         by_i[i].append(x_var)
@@ -210,17 +220,27 @@ def build_and_solve(
         total_assigned = sum(vars_i)
         H_patient += (total_assigned - 1) ** 2
 
-    # ── Full Hamiltonian ──────────────────────────────────────────────────────
+    # Hamiltoniano completo
     H = H_obj + lambda1 * H_doctor + lambda2 * H_patient
 
-    # Compile and convert to QUBO dict
+    # =========================================================================
+    # PASO 5: COMPILACIÓN A MODELO QUBO
+    # =========================================================================
+    # Transformar expresión simbólica en matriz QUBO numérica + offset.
     model = H.compile()
-    feed_dict = {"lambda1": params.lambda1, "lambda2": params.lambda2}
+    feed_dict = {
+        "lambda1": params.lambda1,
+        "lambda2": params.lambda2,
+        "lambda4": params.lambda4,
+    }
     qubo_matrix, qubo_offset = model.to_qubo(feed_dict=feed_dict)
 
     logger.info("QUBO matrix compiled with %d interactions", len(qubo_matrix))
 
-    # ── Solve with SASampler ──────────────────────────────────────────────────
+    # =========================================================================
+    # PASO 6: CONFIGURACIÓN Y EJECUCIÓN DEL SOLVER (SAMPLING)
+    # Simulated Annealing (SASampler) — num_reads para buscar mínimo global.
+    # =========================================================================
     sampler = oj.SASampler()
 
     beta_min, beta_max = params.beta_range if params.beta_range else (0.1, 10.0)
@@ -238,11 +258,16 @@ def build_and_solve(
 
     logger.info("Best energy: %.4f (offset: %.4f)", best_energy, qubo_offset)
 
-    # ── Decode solution ───────────────────────────────────────────────────────
-    decoded, broken, _ = model.decode_sample(
-        best_sample, vartype="BINARY", feed_dict=feed_dict
-    )
+    # =========================================================================
+    # PASO 7: EXTRACCIÓN Y DECODIFICACIÓN DEL RESULTADO
+    # Recuperar best sample y convertir vector binario en asignaciones.
+    # pyqubo 1.5: decode_sample devuelve DecodedSample (no una tupla).
+    # Post-procesador greedy para garantizar restricciones físicas.
+    # =========================================================================
+    decoded = model.decode_sample(best_sample, vartype="BINARY", feed_dict=feed_dict)
 
+    # constraints() devuelve {name: (satisfied, value)}; broken = no satisfechas
+    broken = [name for name, (ok, _) in decoded.constraints().items() if not ok]
     if broken:
         logger.warning("%d broken constraints in best sample", len(broken))
 
@@ -261,11 +286,9 @@ def build_and_solve(
 
     for (i, j, t) in sorted_triplets:
         var_name = f"x_{i}_{j}_{t}"
-        # Retrieve value from decoded sample
-        val = decoded.get("x", {}).get(f"_{i}_{j}_{t}", 0)
-        # Fallback: try direct sample lookup
-        if val == 0:
-            val = best_sample.get(var_name, 0)
+        # Variables creadas con Binary(...) suelto: pyqubo las devuelve en el
+        # sample raw por su nombre literal, no descompuestas en Array.
+        val = best_sample.get(var_name, 0)
 
         if val != 1:
             continue

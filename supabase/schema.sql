@@ -40,6 +40,7 @@ CREATE TABLE users (
   role         user_role NOT NULL DEFAULT 'patient',
   hospital_id  UUID REFERENCES hospitals(id) ON DELETE SET NULL,
   avatar_url   TEXT,
+  phone        TEXT,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -54,11 +55,30 @@ CREATE INDEX idx_users_hospital ON users(hospital_id);
 CREATE TABLE patients_data (
   id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id         UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-  -- JSONB allows adding new fields without schema migrations
-  medical_history JSONB NOT NULL DEFAULT '{}',
-  -- e.g. {"blood_type": "O+", "allergies": [...], "chronic_conditions": [...]}
+  -- Structured JSONB with lifestyle and hereditary_diseases sections
+  medical_history JSONB NOT NULL DEFAULT '{
+    "blood_type": null,
+    "allergies": [],
+    "chronic_conditions": [],
+    "current_medications": [],
+    "previous_surgeries": [],
+    "lifestyle": {
+      "smoking": false,
+      "alcohol": "none",
+      "physical_activity": "sedentary",
+      "diet": null
+    },
+    "hereditary_diseases": {
+      "diabetes": false,
+      "hypertension": false,
+      "cancer": false,
+      "heart_disease": false,
+      "notes": null
+    }
+  }'::jsonb,
   contact_info    JSONB NOT NULL DEFAULT '{}',
-  -- e.g. {"phone": "...", "emergency_contact": {...}, "address": "..."}
+  -- e.g. {"emergency_contact": {...}, "address": "..."}
+  phone           TEXT,         -- teléfono dedicado (más rápido que JSONB)
   date_of_birth   DATE,
   dni             TEXT UNIQUE,  -- Peruvian national ID
   insurance_code  TEXT,
@@ -80,6 +100,8 @@ CREATE TABLE doctors_data (
   available_slots     JSONB NOT NULL DEFAULT '[]',
   room_number         TEXT,
   cmp_license         TEXT UNIQUE, -- Colegio Médico del Perú license
+  dni                 TEXT UNIQUE, -- DNI del médico
+  phone               TEXT,
   max_daily_patients  INT NOT NULL DEFAULT 12,
   is_active           BOOLEAN NOT NULL DEFAULT TRUE,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -205,7 +227,11 @@ CREATE TRIGGER trg_schedules_updated_at
 -- FUNCTION + TRIGGER: auto-create public.users on signup
 -- ============================================================
 CREATE OR REPLACE FUNCTION handle_new_user()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
   INSERT INTO public.users (id, email, full_name, role)
   VALUES (
@@ -215,9 +241,32 @@ BEGIN
     COALESCE((NEW.raw_user_meta_data->>'role')::user_role, 'patient')
   );
 
-  -- If patient, auto-create empty patients_data row
+  -- Si es paciente: crear fila con medical_history estructurado
   IF (COALESCE(NEW.raw_user_meta_data->>'role', 'patient') = 'patient') THEN
-    INSERT INTO public.patients_data (user_id) VALUES (NEW.id);
+    INSERT INTO public.patients_data (user_id, medical_history)
+    VALUES (
+      NEW.id,
+      '{
+        "blood_type": null,
+        "allergies": [],
+        "chronic_conditions": [],
+        "current_medications": [],
+        "previous_surgeries": [],
+        "lifestyle": {
+          "smoking": false,
+          "alcohol": "none",
+          "physical_activity": "sedentary",
+          "diet": null
+        },
+        "hereditary_diseases": {
+          "diabetes": false,
+          "hypertension": false,
+          "cancer": false,
+          "heart_disease": false,
+          "notes": null
+        }
+      }'::jsonb
+    );
   END IF;
 
   -- If doctor, auto-create empty doctors_data row
@@ -231,7 +280,7 @@ BEGIN
 
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
@@ -394,7 +443,7 @@ CREATE POLICY "Admins can insert optimizer runs"
 -- Without this, Supabase flags them as SECURITY DEFINER (ERROR).
 -- ============================================================
 
--- Admin overview: pending appointments with patient names
+-- Admin overview: pending appointments with patient names and referral info
 CREATE VIEW admin_pending_appointments
   WITH (security_invoker = true)
   AS
@@ -406,28 +455,33 @@ CREATE VIEW admin_pending_appointments
     ap.walk_in,
     ap.created_at,
     ap.status,
-    u.full_name AS patient_name,
-    u.email AS patient_email
+    ap.referral_source,
+    ap.referred_by_doctor,
+    u.full_name  AS patient_name,
+    u.email      AS patient_email
   FROM appointments_pool ap
   JOIN users u ON ap.patient_id = u.id
   WHERE ap.status = 'pending'
   ORDER BY ap.urgency_level DESC, ap.created_at ASC;
 
--- Doctor's schedule view with patient details
+-- Doctor's schedule view with patient details (phone + DNI)
 CREATE VIEW doctor_schedule_view
   WITH (security_invoker = true)
   AS
   SELECT
-    s.id AS schedule_id,
+    s.id                    AS schedule_id,
     s.scheduled_datetime,
     s.room,
     s.completed_at,
     ap.urgency_level,
     ap.symptoms,
     ap.requested_specialty,
-    u.full_name AS patient_name,
+    u.full_name             AS patient_name,
+    pd.phone                AS patient_phone,
+    pd.dni                  AS patient_dni,
     s.doctor_id,
     s.appointment_id
   FROM schedules s
   JOIN appointments_pool ap ON s.appointment_id = ap.id
-  JOIN users u ON ap.patient_id = u.id;
+  JOIN users         u  ON ap.patient_id = u.id
+  LEFT JOIN patients_data pd ON pd.user_id = u.id;
