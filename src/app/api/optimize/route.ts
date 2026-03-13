@@ -1,4 +1,4 @@
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase-server'
 import { NextResponse } from 'next/server'
 import type {
   OptimizerPatientInput,
@@ -30,6 +30,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Forbidden: admin role required' }, { status: 403 })
   }
 
+  // Usar service role para evitar recursión infinita de RLS en appointments_pool ↔ schedules
+  const db = process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? createServiceRoleClient()
+    : supabase
+
   // Parse parameters from request body
   const body = await request.json().catch(() => ({}))
   const parameters: OptimizerParameters = {
@@ -41,7 +46,7 @@ export async function POST(request: Request) {
   }
 
   // ── 1. Create optimizer run record ───────────────────────
-  const { data: runRecord, error: runInsertError } = await supabase
+  const { data: runRecord, error: runInsertError } = await db
     .from('optimizer_runs')
     .insert({
       triggered_by: user.id,
@@ -60,17 +65,17 @@ export async function POST(request: Request) {
 
   try {
     // ── 2. Fetch pending appointments ──────────────────────
-    const { data: pendingAppointments, error: apptError } = await supabase
+    const { data: pendingAppointments, error: apptError } = await db
       .from('appointments_pool')
       .select('id, patient_id, urgency_level, requested_specialty, referral_source')
       .eq('status', 'pending')
-      .order('referral_source', { ascending: true })   // doctor_referred sorts before direct
+      .order('referral_source', { ascending: true })
       .order('urgency_level', { ascending: false })
 
     if (apptError) throw new Error(`Failed to fetch appointments: ${apptError.message}`)
 
     if (!pendingAppointments || pendingAppointments.length === 0) {
-      await supabase.from('optimizer_runs').update({
+      await db.from('optimizer_runs').update({
         status: 'completed',
         duration_ms: Date.now() - startTime,
         result_summary: { assigned: 0, unassigned: 0, energy: 0 },
@@ -83,7 +88,7 @@ export async function POST(request: Request) {
     }
 
     // ── 3. Fetch active doctors with availability ──────────
-    const { data: doctors, error: docError } = await supabase
+    const { data: doctors, error: docError } = await db
       .from('doctors_data')
       .select(`
         user_id, specialty, available_slots, room_number, max_daily_patients,
@@ -154,7 +159,7 @@ export async function POST(request: Request) {
         optimizer_run_id: optimizerRunId,
       }))
 
-      const { error: schedInsertErr } = await supabase
+      const { error: schedInsertErr } = await db
         .from('schedules')
         .upsert(scheduleInserts, { onConflict: 'appointment_id' })
 
@@ -162,7 +167,7 @@ export async function POST(request: Request) {
 
       // Update appointment statuses to 'scheduled'
       const appointmentIds = assignments.map(a => a.patient_id)
-      await supabase
+      await db
         .from('appointments_pool')
         .update({ status: 'scheduled' })
         .in('id', appointmentIds)
@@ -170,7 +175,7 @@ export async function POST(request: Request) {
 
     // ── 7. Update optimizer run as completed ───────────────
     const durationMs = Date.now() - startTime
-    await supabase.from('optimizer_runs').update({
+    await db.from('optimizer_runs').update({
       status: 'completed' as const,
       result_summary: summary as unknown as import('@/lib/database.types').Json,
       duration_ms: durationMs,
@@ -185,7 +190,7 @@ export async function POST(request: Request) {
   } catch (error) {
     // Mark run as failed
     const errMessage = error instanceof Error ? error.message : String(error)
-    await supabase.from('optimizer_runs').update({
+    await db.from('optimizer_runs').update({
       status: 'failed' as const,
       error_message: errMessage,
       duration_ms: Date.now() - startTime,
