@@ -134,12 +134,22 @@ export async function POST(request: Request) {
     }
 
     // ── 5. Call Python microservice ────────────────────────
-    const solverResponse = await fetch(`${OPTIMIZER_URL}/solve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(optimizerRequest),
-      signal: AbortSignal.timeout(120_000), // 2 min timeout for large problems
-    })
+    let solverResponse: Response
+    try {
+      solverResponse = await fetch(`${OPTIMIZER_URL}/solve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(optimizerRequest),
+        signal: AbortSignal.timeout(120_000), // 2 min timeout for large problems
+      })
+    } catch (fetchErr) {
+      const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr)
+      throw new Error(
+        `No se pudo conectar con el microservicio Python en ${OPTIMIZER_URL}. ` +
+        `Verifica que el servicio esté corriendo (uvicorn app.main:app --port 8000). ` +
+        `Detalle: ${msg}`
+      )
+    }
 
     if (!solverResponse.ok) {
       const errText = await solverResponse.text()
