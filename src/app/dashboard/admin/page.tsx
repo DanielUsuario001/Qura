@@ -46,6 +46,48 @@ export default async function AdminDashboardPage() {
     result_summary: r.result_summary as Record<string, number> | null,
   }))
 
+  // Fetch scheduled appointments for calendar view
+  const { data: scheduledRaw } = await db
+    .from('schedules')
+    .select(`
+      id, scheduled_datetime, room, completed_at, doctor_id, appointment_id,
+      appointments_pool!schedules_appointment_id_fkey (
+        requested_specialty, urgency_level,
+        users!appointments_pool_patient_id_fkey ( full_name )
+      ),
+      users!schedules_doctor_id_fkey ( full_name )
+    `)
+    .order('scheduled_datetime', { ascending: true })
+    .limit(300)
+
+  type ScheduledRaw = {
+    id: string
+    scheduled_datetime: string
+    room: string | null
+    completed_at: string | null
+    doctor_id: string
+    appointments_pool: {
+      requested_specialty: string
+      urgency_level: number
+      users: { full_name: string } | null
+    } | null
+    users: { full_name: string } | null
+  }
+
+  const scheduledAppointments = (scheduledRaw ?? []).map((s) => {
+    const row = s as unknown as ScheduledRaw
+    return {
+      id: row.id,
+      scheduled_datetime: row.scheduled_datetime,
+      room: row.room,
+      completed_at: row.completed_at,
+      doctor_name: row.users?.full_name ?? '—',
+      patient_name: row.appointments_pool?.users?.full_name ?? '—',
+      specialty: row.appointments_pool?.requested_specialty ?? '—',
+      urgency_level: row.appointments_pool?.urgency_level ?? 0,
+    }
+  })
+
   // Fetch metrics
   const [
     { count: totalPending },
@@ -65,6 +107,7 @@ export default async function AdminDashboardPage() {
       adminId={user.id}
       initialPendingAppointments={pendingAppointments}
       initialOptimizerRuns={optimizerRuns}
+      initialScheduledAppointments={scheduledAppointments}
       metrics={{
         totalPending: totalPending ?? 0,
         totalScheduled: totalScheduled ?? 0,

@@ -1,9 +1,20 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import type { AdminPendingAppointment } from '@/lib/types'
+
+export interface ScheduledAppointment {
+  id: string
+  scheduled_datetime: string
+  room: string | null
+  completed_at: string | null
+  doctor_name: string
+  patient_name: string
+  specialty: string
+  urgency_level: number
+}
 
 const SPECIALTIES = [
   'Cardiología', 'Neurología', 'Pediatría', 'Traumatología',
@@ -25,6 +36,7 @@ interface Props {
   adminId: string
   initialPendingAppointments: AdminPendingAppointment[]
   initialOptimizerRuns: OptimizerRunRow[]
+  initialScheduledAppointments: ScheduledAppointment[]
   metrics: { totalPending: number; totalScheduled: number; completedToday: number }
 }
 
@@ -42,16 +54,53 @@ const STATUS_RUN_CONFIG = {
   failed:    { label: 'Error',       color: 'bg-red-500/10 text-red-400 border-red-500/30' },
 }
 
+const HOURS = Array.from({ length: 13 }, (_, i) => i + 7) // 7:00 → 19:00
+
+const SPECIALTY_COLORS: Record<string, string> = {
+  'Cardiología':      'bg-red-500/20 border-red-500/40 text-red-300',
+  'Neurología':       'bg-purple-500/20 border-purple-500/40 text-purple-300',
+  'Traumatología':    'bg-orange-500/20 border-orange-500/40 text-orange-300',
+  'Neumología':       'bg-cyan-500/20 border-cyan-500/40 text-cyan-300',
+  'Gastroenterología':'bg-yellow-500/20 border-yellow-500/40 text-yellow-300',
+  'Dermatología':     'bg-pink-500/20 border-pink-500/40 text-pink-300',
+  'Endocrinología':   'bg-lime-500/20 border-lime-500/40 text-lime-300',
+  'Pediatría':        'bg-green-500/20 border-green-500/40 text-green-300',
+  'Ginecología':      'bg-fuchsia-500/20 border-fuchsia-500/40 text-fuchsia-300',
+  'Oftalmología':     'bg-teal-500/20 border-teal-500/40 text-teal-300',
+}
+const DEFAULT_COLOR = 'bg-sky-500/20 border-sky-500/40 text-sky-300'
+
 export function AdminDashboardClient({
-  userName, adminId, initialPendingAppointments, initialOptimizerRuns, metrics
+  userName, adminId, initialPendingAppointments, initialOptimizerRuns, initialScheduledAppointments, metrics
 }: Props) {
   const [pendingAppointments, setPendingAppointments] = useState(initialPendingAppointments)
   const [optimizerRuns, setOptimizerRuns] = useState(initialOptimizerRuns)
-  const [filterStatus, setFilterStatus] = useState<'all' | 'pending'>('all')
+  const [scheduledAppointments, setScheduledAppointments] = useState(initialScheduledAppointments)
   const [filterUrgency, setFilterUrgency] = useState<number | null>(null)
   const [running, setRunning] = useState(false)
   const [runResult, setRunResult] = useState<string | null>(null)
   const [showWalkIn, setShowWalkIn] = useState(false)
+
+  // Calendar state
+  const [calendarView, setCalendarView] = useState<'agenda' | 'pending'>('pending')
+
+  // Group scheduled appointments by date
+  const appointmentsByDate = useMemo(() => {
+    const map = new Map<string, ScheduledAppointment[]>()
+    for (const appt of scheduledAppointments) {
+      const date = appt.scheduled_datetime.slice(0, 10)
+      if (!map.has(date)) map.set(date, [])
+      map.get(date)!.push(appt)
+    }
+    return map
+  }, [scheduledAppointments])
+
+  const calendarDates = useMemo(() =>
+    Array.from(appointmentsByDate.keys()).sort(), [appointmentsByDate])
+
+  const [selectedDate, setSelectedDate] = useState<string>(() =>
+    calendarDates[0] ?? new Date().toISOString().slice(0, 10)
+  )
 
   // Walk-in form state
   const [wiSpecialty, setWiSpecialty] = useState('General')
@@ -102,6 +151,9 @@ export function AdminDashboardClient({
           .select('*')
           .order('urgency_level', { ascending: false })
         if (stillPending) setPendingAppointments(stillPending as import('@/lib/types').AdminPendingAppointment[])
+
+        // Refresh calendar — reload page to get service-role scheduled data
+        window.location.reload()
       }
     } catch {
       setRunResult('Error de red: no se pudo conectar con el microservicio.')
@@ -377,6 +429,136 @@ export function AdminDashboardClient({
               )}
             </div>
           </div>
+        </div>
+
+        {/* ── Agenda / Calendar View ───────────────────────── */}
+        <div className="mt-8">
+          {/* Tab selector */}
+          <div className="flex items-center gap-1 mb-5 bg-slate-900 border border-slate-800 rounded-xl p-1 w-fit">
+            <button
+              onClick={() => setCalendarView('pending')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${calendarView === 'pending' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              Cola Pendiente
+            </button>
+            <button
+              onClick={() => setCalendarView('agenda')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 ${calendarView === 'agenda' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+              </svg>
+              Agenda por Día
+              {scheduledAppointments.length > 0 && (
+                <span className="bg-sky-600 text-white text-xs px-1.5 py-0.5 rounded-full">{scheduledAppointments.length}</span>
+              )}
+            </button>
+          </div>
+
+          {calendarView === 'agenda' && (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+              {scheduledAppointments.length === 0 ? (
+                <div className="text-center py-16">
+                  <svg className="w-10 h-10 text-slate-700 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                  </svg>
+                  <p className="text-slate-500 text-sm">No hay citas programadas aún. Ejecuta la optimización cuántica para asignar citas.</p>
+                </div>
+              ) : (
+                <>
+                  {/* Day selector */}
+                  <div className="flex gap-1 p-3 border-b border-slate-800 overflow-x-auto">
+                    {calendarDates.map(date => {
+                      const d = new Date(date + 'T12:00:00')
+                      const count = appointmentsByDate.get(date)?.length ?? 0
+                      const isSelected = date === selectedDate
+                      return (
+                        <button
+                          key={date}
+                          onClick={() => setSelectedDate(date)}
+                          className={`flex flex-col items-center px-4 py-2 rounded-lg min-w-[70px] transition ${
+                            isSelected ? 'bg-sky-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                          }`}
+                        >
+                          <span className="text-xs font-medium uppercase">
+                            {d.toLocaleDateString('es-PE', { weekday: 'short' })}
+                          </span>
+                          <span className="text-xl font-bold leading-tight">{d.getDate()}</span>
+                          <span className="text-xs opacity-70">
+                            {d.toLocaleDateString('es-PE', { month: 'short' })}
+                          </span>
+                          <span className={`mt-1 text-xs px-1.5 py-0.5 rounded-full ${isSelected ? 'bg-white/20' : 'bg-slate-700'}`}>
+                            {count}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  {/* Time grid */}
+                  <div className="overflow-y-auto max-h-[600px]">
+                    {HOURS.map(hour => {
+                      const dayAppts = (appointmentsByDate.get(selectedDate) ?? [])
+                        .filter(a => new Date(a.scheduled_datetime).getHours() === hour)
+                        .sort((a, b) => a.scheduled_datetime.localeCompare(b.scheduled_datetime))
+
+                      return (
+                        <div key={hour} className="flex border-b border-slate-800/60 min-h-[56px]">
+                          {/* Hour label */}
+                          <div className="w-16 shrink-0 px-3 py-3 text-right">
+                            <span className="text-slate-500 text-xs font-mono">
+                              {String(hour).padStart(2, '0')}:00
+                            </span>
+                          </div>
+                          {/* Events */}
+                          <div className="flex-1 px-3 py-2 flex flex-wrap gap-2">
+                            {dayAppts.length === 0 ? (
+                              <div className="h-full w-full border-l border-slate-800/40" />
+                            ) : (
+                              dayAppts.map(appt => {
+                                const dt = new Date(appt.scheduled_datetime)
+                                const timeStr = dt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })
+                                const colorClass = SPECIALTY_COLORS[appt.specialty] ?? DEFAULT_COLOR
+                                const isCompleted = !!appt.completed_at
+                                return (
+                                  <div
+                                    key={appt.id}
+                                    className={`flex flex-col px-3 py-2 rounded-lg border text-xs min-w-[180px] max-w-[260px] ${colorClass} ${isCompleted ? 'opacity-50' : ''}`}
+                                  >
+                                    <div className="flex items-center justify-between gap-2 mb-1">
+                                      <span className="font-mono font-medium">{timeStr}</span>
+                                      {appt.room && (
+                                        <span className="bg-black/20 px-1.5 py-0.5 rounded text-xs">
+                                          Sala {appt.room}
+                                        </span>
+                                      )}
+                                      {isCompleted && (
+                                        <span className="bg-green-500/30 text-green-300 px-1.5 py-0.5 rounded text-xs">✓</span>
+                                      )}
+                                    </div>
+                                    <span className="font-semibold truncate">{appt.patient_name}</span>
+                                    <span className="opacity-80 truncate">{appt.specialty}</span>
+                                    <span className="opacity-60 truncate text-xs mt-0.5">Dr. {appt.doctor_name}</span>
+                                    <div className="mt-1 flex items-center gap-1">
+                                      <span className={`w-1.5 h-1.5 rounded-full ${
+                                        appt.urgency_level >= 8 ? 'bg-red-400' :
+                                        appt.urgency_level >= 5 ? 'bg-yellow-400' : 'bg-green-400'
+                                      }`} />
+                                      <span className="opacity-60">Urgencia {appt.urgency_level}</span>
+                                    </div>
+                                  </div>
+                                )
+                              })
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Walk-in Modal */}
