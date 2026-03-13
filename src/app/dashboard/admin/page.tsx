@@ -78,6 +78,7 @@ export default async function AdminDashboardPage() {
     const row = s as unknown as ScheduledRaw
     return {
       id: row.id,
+      appointment_id: row.appointment_id,
       scheduled_datetime: row.scheduled_datetime,
       room: row.room,
       completed_at: row.completed_at,

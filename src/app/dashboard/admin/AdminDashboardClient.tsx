@@ -7,6 +7,7 @@ import type { AdminPendingAppointment } from '@/lib/types'
 
 export interface ScheduledAppointment {
   id: string
+  appointment_id: string
   scheduled_datetime: string
   room: string | null
   completed_at: string | null
@@ -162,6 +163,25 @@ export function AdminDashboardClient({
     }
 
     setRunning(false)
+  }
+
+  async function handleMarkComplete(scheduleId: string, appointmentId: string) {
+    const now = new Date().toISOString()
+    const { error } = await supabase
+      .from('schedules')
+      .update({ completed_at: now })
+      .eq('id', scheduleId)
+
+    if (!error) {
+      await supabase
+        .from('appointments_pool')
+        .update({ status: 'completed' })
+        .eq('id', appointmentId)
+
+      setScheduledAppointments(prev =>
+        prev.map(s => s.id === scheduleId ? { ...s, completed_at: now } : s)
+      )
+    }
   }
 
   async function handleWalkInSubmit(e: React.FormEvent) {
@@ -543,12 +563,22 @@ export function AdminDashboardClient({
                                     <span className="font-semibold truncate">{appt.patient_name}</span>
                                     <span className="opacity-80 truncate">{appt.specialty}</span>
                                     <span className="opacity-60 truncate text-xs mt-0.5">Dr. {appt.doctor_name}</span>
-                                    <div className="mt-1 flex items-center gap-1">
-                                      <span className={`w-1.5 h-1.5 rounded-full ${
-                                        appt.urgency_level >= 8 ? 'bg-red-400' :
-                                        appt.urgency_level >= 5 ? 'bg-yellow-400' : 'bg-green-400'
-                                      }`} />
-                                      <span className="opacity-60">Urgencia {appt.urgency_level}</span>
+                                    <div className="mt-1 flex items-center justify-between gap-1">
+                                      <div className="flex items-center gap-1">
+                                        <span className={`w-1.5 h-1.5 rounded-full ${
+                                          appt.urgency_level >= 8 ? 'bg-red-400' :
+                                          appt.urgency_level >= 5 ? 'bg-yellow-400' : 'bg-green-400'
+                                        }`} />
+                                        <span className="opacity-60">Urgencia {appt.urgency_level}</span>
+                                      </div>
+                                      {!isCompleted && (
+                                        <button
+                                          onClick={() => handleMarkComplete(appt.id, appt.appointment_id)}
+                                          className="text-xs px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-300 border border-emerald-500/30 transition font-medium"
+                                        >
+                                          ✓ Completar
+                                        </button>
+                                      )}
                                     </div>
                                   </div>
                                 )

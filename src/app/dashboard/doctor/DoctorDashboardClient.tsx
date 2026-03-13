@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import type { DoctorScheduleEntry } from '@/lib/types'
 
@@ -49,11 +48,8 @@ function getDateGroup(iso: string): string {
 export function DoctorDashboardClient({
   userName, doctorId, specialty, room, maxDailyPatients, initialSchedule, todayCount, completedToday
 }: Props) {
-  const [schedule, setSchedule] = useState<DoctorScheduleEntry[]>(initialSchedule)
+  const [schedule] = useState<DoctorScheduleEntry[]>(initialSchedule)
   const [viewMode, setViewMode] = useState<ViewMode>('today')
-  const [completingId, setCompletingId] = useState<string | null>(null)
-  const [completionNotes, setCompletionNotes] = useState('')
-  const [notesModal, setNotesModal] = useState<string | null>(null)
 
   const today = new Date().toISOString().slice(0, 10)
   const weekEndISO = new Date(Date.now() + 7 * 86_400_000).toISOString()
@@ -71,37 +67,6 @@ export function DoctorDashboardClient({
     const group = getDateGroup(entry.scheduled_datetime)
     if (!grouped[group]) grouped[group] = []
     grouped[group].push(entry)
-  }
-
-  async function handleMarkComplete(scheduleId: string, appointmentId: string) {
-    setCompletingId(scheduleId)
-    const supabase = createClient()
-
-    const { error } = await supabase
-      .from('schedules')
-      .update({
-        completed_at: new Date().toISOString(),
-        completion_notes: completionNotes || null,
-      })
-      .eq('id', scheduleId)
-
-    if (!error) {
-      // Also mark appointment as completed
-      await supabase
-        .from('appointments_pool')
-        .update({ status: 'completed' })
-        .eq('id', appointmentId)
-
-      setSchedule(prev => prev.map(s =>
-        s.schedule_id === scheduleId
-          ? { ...s, completed_at: new Date().toISOString() }
-          : s
-      ))
-    }
-
-    setNotesModal(null)
-    setCompletionNotes('')
-    setCompletingId(null)
   }
 
   const pendingToday = todayCount - completedToday
@@ -241,17 +206,15 @@ export function DoctorDashboardClient({
                             )}
                           </div>
 
-                          {/* Action */}
-                          {!isCompleted && (
-                            <button
-                              onClick={() => setNotesModal(entry.schedule_id)}
-                              className="shrink-0 flex items-center gap-2 px-4 py-2 bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 text-sm font-medium rounded-lg transition"
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                              </svg>
-                              Completar
-                            </button>
+                          {/* Estado — solo lectura, el admin verifica el cumplimiento */}
+                          {isCompleted ? (
+                            <span className="shrink-0 text-xs px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
+                              Atendido
+                            </span>
+                          ) : (
+                            <span className="shrink-0 text-xs px-3 py-1.5 rounded-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 font-medium">
+                              Pendiente
+                            </span>
                           )}
                         </div>
                       </div>
@@ -264,44 +227,6 @@ export function DoctorDashboardClient({
         )}
       </div>
 
-      {/* Completion notes modal */}
-      {notesModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-            <h3 className="text-white font-semibold text-lg mb-4">Marcar como completado</h3>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-slate-300 mb-1.5">
-                Notas de atención (opcional)
-              </label>
-              <textarea
-                value={completionNotes}
-                onChange={(e) => setCompletionNotes(e.target.value)}
-                rows={3}
-                className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition resize-none"
-                placeholder="Diagnóstico, indicaciones, seguimiento..."
-              />
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  const entry = schedule.find(s => s.schedule_id === notesModal)
-                  if (entry) handleMarkComplete(notesModal, entry.appointment_id)
-                }}
-                disabled={completingId !== null}
-                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-semibold rounded-lg transition"
-              >
-                {completingId ? 'Guardando...' : 'Confirmar'}
-              </button>
-              <button
-                onClick={() => { setNotesModal(null); setCompletionNotes('') }}
-                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </DashboardLayout>
   )
 }
