@@ -54,7 +54,7 @@ const STATUS_RUN_CONFIG = {
   failed:    { label: 'Error',       color: 'bg-red-500/10 text-red-400 border-red-500/30' },
 }
 
-const HOURS = Array.from({ length: 13 }, (_, i) => i + 7) // 7:00 → 19:00
+const HOURS = Array.from({ length: 14 }, (_, i) => i + 6) // 06:00 → 19:00 UTC
 
 const SPECIALTY_COLORS: Record<string, string> = {
   'Cardiología':      'bg-red-500/20 border-red-500/40 text-red-300',
@@ -84,11 +84,13 @@ export function AdminDashboardClient({
   // Calendar state
   const [calendarView, setCalendarView] = useState<'agenda' | 'pending'>('pending')
 
-  // Group scheduled appointments by date
+  // Group scheduled appointments by date (using UTC date to match optimizer slots)
   const appointmentsByDate = useMemo(() => {
     const map = new Map<string, ScheduledAppointment[]>()
     for (const appt of scheduledAppointments) {
-      const date = appt.scheduled_datetime.slice(0, 10)
+      const dt = new Date(appt.scheduled_datetime)
+      // Use UTC date so days match how the optimizer stored them
+      const date = dt.toISOString().slice(0, 10)
       if (!map.has(date)) map.set(date, [])
       map.get(date)!.push(appt)
     }
@@ -499,16 +501,17 @@ export function AdminDashboardClient({
                   <div className="overflow-y-auto max-h-[600px]">
                     {HOURS.map(hour => {
                       const dayAppts = (appointmentsByDate.get(selectedDate) ?? [])
-                        .filter(a => new Date(a.scheduled_datetime).getHours() === hour)
+                        .filter(a => new Date(a.scheduled_datetime).getUTCHours() === hour)
                         .sort((a, b) => a.scheduled_datetime.localeCompare(b.scheduled_datetime))
 
                       return (
                         <div key={hour} className="flex border-b border-slate-800/60 min-h-[56px]">
                           {/* Hour label */}
-                          <div className="w-16 shrink-0 px-3 py-3 text-right">
+                          <div className="w-20 shrink-0 px-3 py-3 text-right">
                             <span className="text-slate-500 text-xs font-mono">
                               {String(hour).padStart(2, '0')}:00
                             </span>
+                            <span className="text-slate-700 text-xs block">UTC</span>
                           </div>
                           {/* Events */}
                           <div className="flex-1 px-3 py-2 flex flex-wrap gap-2">
@@ -517,7 +520,8 @@ export function AdminDashboardClient({
                             ) : (
                               dayAppts.map(appt => {
                                 const dt = new Date(appt.scheduled_datetime)
-                                const timeStr = dt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })
+                                // Display in UTC since optimizer generates UTC slots
+                                const timeStr = dt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })
                                 const colorClass = SPECIALTY_COLORS[appt.specialty] ?? DEFAULT_COLOR
                                 const isCompleted = !!appt.completed_at
                                 return (
