@@ -28,22 +28,22 @@ const navItems = [
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString('es-PE', {
-    weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit'
-  })
+    weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit',
+    timeZone: 'UTC',
+  }) + ' UTC'
 }
 
 function getDateGroup(iso: string): string {
-  const d = new Date(iso)
-  const today = new Date()
-  const tomorrow = new Date(today)
-  tomorrow.setDate(today.getDate() + 1)
+  // Usar fecha UTC para consistencia con el optimizer
+  const dateUTC = iso.slice(0, 10) // "YYYY-MM-DD"
+  const todayUTC = new Date().toISOString().slice(0, 10)
+  const tomorrowUTC = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)
 
-  const isToday = d.toDateString() === today.toDateString()
-  const isTomorrow = d.toDateString() === tomorrow.toDateString()
-
-  if (isToday) return 'Hoy'
-  if (isTomorrow) return 'Mañana'
-  return d.toLocaleDateString('es-PE', { weekday: 'long', day: '2-digit', month: 'long' })
+  if (dateUTC === todayUTC) return 'Hoy'
+  if (dateUTC === tomorrowUTC) return 'Mañana'
+  return new Date(iso).toLocaleDateString('es-PE', {
+    weekday: 'long', day: '2-digit', month: 'long', timeZone: 'UTC',
+  })
 }
 
 export function DoctorDashboardClient({
@@ -55,14 +55,13 @@ export function DoctorDashboardClient({
   const [completionNotes, setCompletionNotes] = useState('')
   const [notesModal, setNotesModal] = useState<string | null>(null)
 
-  const today = new Date().toISOString().split('T')[0]
-  const weekEnd = new Date()
-  weekEnd.setDate(weekEnd.getDate() + 7)
+  const today = new Date().toISOString().slice(0, 10)
+  const weekEndISO = new Date(Date.now() + 7 * 86_400_000).toISOString()
 
   const filteredSchedule = schedule.filter(s => {
     const dt = s.scheduled_datetime
-    if (viewMode === 'today') return dt.startsWith(today)
-    if (viewMode === 'week') return dt >= today && dt <= weekEnd.toISOString()
+    if (viewMode === 'today') return dt.slice(0, 10) === today
+    if (viewMode === 'week') return dt >= today && dt <= weekEndISO
     return dt >= today
   })
 
@@ -204,8 +203,9 @@ export function DoctorDashboardClient({
                           {/* Time column */}
                           <div className="shrink-0 text-center w-16">
                             <p className="text-sky-400 font-bold text-lg leading-none">
-                              {new Date(entry.scheduled_datetime).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}
+                              {new Date(entry.scheduled_datetime).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })}
                             </p>
+                            <p className="text-slate-600 text-xs">UTC</p>
                             {entry.room && (
                               <p className="text-slate-500 text-xs mt-1">Sala {entry.room}</p>
                             )}

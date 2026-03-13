@@ -1,7 +1,10 @@
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import { DoctorDashboardClient } from './DoctorDashboardClient'
 import type { DoctorScheduleEntry } from '@/lib/types'
+
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 export default async function DoctorDashboardPage() {
   const supabase = await createServerSupabaseClient()
@@ -17,8 +20,13 @@ export default async function DoctorDashboardPage() {
 
   if (profile?.role !== 'doctor') redirect('/dashboard/' + profile?.role)
 
+  // Usar service role para evitar recursión infinita de RLS (schedules ↔ appointments_pool)
+  const db = process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? createServiceRoleClient()
+    : supabase
+
   // Fetch doctor's full schedule (upcoming + today)
-  const { data: scheduleRaw } = await supabase
+  const { data: scheduleRaw } = await db
     .from('doctor_schedule_view')
     .select('*')
     .eq('doctor_id', user.id)
@@ -27,13 +35,13 @@ export default async function DoctorDashboardPage() {
   const schedule = (scheduleRaw ?? []) as DoctorScheduleEntry[]
 
   // Doctor's profile data
-  const { data: doctorData } = await supabase
+  const { data: doctorData } = await db
     .from('doctors_data')
     .select('specialty, room_number, max_daily_patients')
     .eq('user_id', user.id)
     .single()
 
-  // Stats
+  // Stats — usar fecha UTC para consistencia con el optimizer
   const today = new Date().toISOString().split('T')[0]
   const todaySchedule = schedule.filter(s =>
     s.scheduled_datetime.startsWith(today)
