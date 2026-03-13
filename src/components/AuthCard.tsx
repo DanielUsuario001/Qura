@@ -22,12 +22,9 @@ export function AuthCard({ children, title, subtitle }: AuthCardProps) {
 
       <div className="relative w-full max-w-md">
         {/* Brand */}
-        <div className="text-center mb-8">
-          <div className="mb-4">
-            <Image src="/logo.png" alt="Qura Health" width={72} height={72} className="rounded-2xl shadow-lg shadow-sky-600/20" priority />
-          </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Qura Health</h1>
-          <p className="text-sky-400 text-sm mt-1 font-medium tracking-wide uppercase">Quantum-Powered Clinical Scheduling</p>
+        <div className="flex flex-col items-center mb-8">
+          <Image src="/logo.png" alt="Qura" width={80} height={80} className="rounded-2xl shadow-lg shadow-sky-600/20 mb-4" priority />
+          <h1 className="text-2xl font-bold text-white tracking-tight">Qura</h1>
         </div>
 
         {/* Card */}

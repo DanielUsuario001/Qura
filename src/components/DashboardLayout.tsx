@@ -66,8 +66,7 @@ export function DashboardLayout({ children, role, userName, navItems, lightTheme
           <div className="flex items-center gap-3">
             <Image src="/logo.png" alt="Qura" width={28} height={28} className="shrink-0" />
             <div>
-              <p className={`font-bold text-sm leading-none tracking-tight ${lt ? 'text-sky-900' : 'text-white'}`}>Qura Health</p>
-              <p className={`text-xs mt-0.5 ${lt ? 'text-sky-400' : 'text-slate-500'}`}>v1.0</p>
+              <p className={`font-bold text-sm leading-none tracking-tight ${lt ? 'text-sky-900' : 'text-white'}`}>Qura</p>
             </div>
           </div>
         </div>
