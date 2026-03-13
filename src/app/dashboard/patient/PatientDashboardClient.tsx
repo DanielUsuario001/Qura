@@ -52,7 +52,6 @@ export function PatientDashboardClient({ userName, userId, initialAppointments }
   const [specialty, setSpecialty] = useState('General')
   const [urgency, setUrgency] = useState(5)
   const [symptoms, setSymptoms] = useState('')
-  const [preferredDate, setPreferredDate] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [formSuccess, setFormSuccess] = useState(false)
@@ -70,7 +69,6 @@ export function PatientDashboardClient({ userName, userId, initialAppointments }
         requested_specialty: specialty,
         urgency_level: urgency,
         symptoms: symptoms || null,
-        preferred_date: preferredDate || null,
       })
       .select()
       .single()
@@ -147,27 +145,16 @@ export function PatientDashboardClient({ userName, userId, initialAppointments }
               </div>
             ) : (
               <form onSubmit={handleSubmitRequest} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1.5">Especialidad requerida</label>
-                    <select
-                      value={specialty}
-                      onChange={(e) => setSpecialty(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
-                    >
-                      {SPECIALTIES.map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1.5">Fecha preferida (opcional)</label>
-                    <input
-                      type="date"
-                      value={preferredDate}
-                      onChange={(e) => setPreferredDate(e.target.value)}
-                      min={new Date().toISOString().split('T')[0]}
-                      className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-1.5">Especialidad requerida</label>
+                  <select
+                    value={specialty}
+                    onChange={(e) => setSpecialty(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
+                  >
+                    {SPECIALTIES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <p className="text-slate-500 text-xs mt-1.5">La fecha y hora será asignada automáticamente por el sistema de optimización cuántica.</p>
                 </div>
 
                 <div>
