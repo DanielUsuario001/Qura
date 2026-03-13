@@ -1,7 +1,11 @@
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import { AdminDashboardClient } from './AdminDashboardClient'
 import type { AdminPendingAppointment } from '@/lib/types'
+
+// Evitar caché: siempre obtener datos frescos
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 export default async function AdminDashboardPage() {
   const supabase = await createServerSupabaseClient()
@@ -17,8 +21,13 @@ export default async function AdminDashboardPage() {
 
   if (profile?.role !== 'admin') redirect('/dashboard/' + profile?.role)
 
+  // Usar service role para datos admin (evita problemas de RLS con get_my_role)
+  const db = process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? createServiceRoleClient()
+    : supabase
+
   // Fetch pending appointments with patient data
-  const { data: pendingAppointmentsRaw } = await supabase
+  const { data: pendingAppointmentsRaw } = await db
     .from('admin_pending_appointments')
     .select('*')
     .order('urgency_level', { ascending: false })
@@ -26,7 +35,7 @@ export default async function AdminDashboardPage() {
   const pendingAppointments = (pendingAppointmentsRaw ?? []) as AdminPendingAppointment[]
 
   // Fetch optimizer run history
-  const { data: optimizerRunsRaw } = await supabase
+  const { data: optimizerRunsRaw } = await db
     .from('optimizer_runs')
     .select('id, run_at, status, result_summary, triggered_by, duration_ms')
     .order('run_at', { ascending: false })
@@ -43,9 +52,9 @@ export default async function AdminDashboardPage() {
     { count: totalScheduled },
     { count: completedToday },
   ] = await Promise.all([
-    supabase.from('appointments_pool').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
-    supabase.from('appointments_pool').select('*', { count: 'exact', head: true }).eq('status', 'scheduled'),
-    supabase.from('schedules').select('*', { count: 'exact', head: true })
+    db.from('appointments_pool').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+    db.from('appointments_pool').select('*', { count: 'exact', head: true }).eq('status', 'scheduled'),
+    db.from('schedules').select('*', { count: 'exact', head: true })
       .not('completed_at', 'is', null)
       .gte('completed_at', new Date().toISOString().split('T')[0]),
   ])

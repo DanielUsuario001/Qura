@@ -110,7 +110,7 @@ export async function POST(request: Request) {
       id:                  a.id,
       urgency:             a.urgency_level,
       specialty:           a.requested_specialty,
-      referral_multiplier: REFERRAL_MULTIPLIER[(a as { referral_source?: string }).referral_source ?? 'direct'] ?? 1,
+      referral_multiplier: REFERRAL_MULTIPLIER[a.referral_source ?? 'direct'] ?? 1,
     }))
 
     const doctorInputs: OptimizerDoctorInput[] = doctors.map(d => ({

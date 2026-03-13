@@ -172,6 +172,8 @@ export type Database = {
           inserted_by_admin: string | null
           preferred_date: string | null
           notes: string | null
+          referral_source: 'direct' | 'doctor_referred'
+          referred_by_doctor: string | null
           created_at: string
           updated_at: string
         }
@@ -186,6 +188,8 @@ export type Database = {
           inserted_by_admin?: string | null
           preferred_date?: string | null
           notes?: string | null
+          referral_source?: 'direct' | 'doctor_referred'
+          referred_by_doctor?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -200,6 +204,8 @@ export type Database = {
           inserted_by_admin?: string | null
           preferred_date?: string | null
           notes?: string | null
+          referral_source?: 'direct' | 'doctor_referred'
+          referred_by_doctor?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -322,6 +328,8 @@ export type Database = {
           walk_in: boolean
           created_at: string
           status: 'pending' | 'scheduled' | 'completed' | 'cancelled'
+          referral_source: 'direct' | 'doctor_referred'
+          referred_by_doctor: string | null
           patient_name: string
           patient_email: string
         }
